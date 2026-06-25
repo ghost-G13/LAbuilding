@@ -37,23 +37,19 @@ function getEntityHeight(entity) {
 
 // 根据高度返回颜色
 function getHeightColor(height) {
-  if (height <= 10) {
-    // 浅蓝色，透明度 0.75
+  if (height <= 5) {
+    return Cesium.Color.fromCssColorString('rgba(65, 105, 225, 0.75)')
+  } else if (height <= 10) {
     return Cesium.Color.fromCssColorString('rgba(135, 206, 250, 0.75)')
-  } else if (height <= 20) {
-    // 青绿色，透明度 0.75
+  } else if (height <= 15) {
     return Cesium.Color.fromCssColorString('rgba(0, 206, 209, 0.75)')
-  } else if (height <= 30) {
-    // 绿色，透明度 0.75
+  } else if (height <= 20) {
     return Cesium.Color.fromCssColorString('rgba(50, 205, 50, 0.75)')
-  } else if (height <= 40) {
-    // 黄色，透明度 0.78
+  } else if (height <= 25) {
     return Cesium.Color.fromCssColorString('rgba(255, 215, 0, 0.78)')
-  } else if (height <= 50) {
-    // 橙色，透明度 0.8
+  } else if (height <= 30) {
     return Cesium.Color.fromCssColorString('rgba(255, 165, 0, 0.8)')
   } else {
-    // 红色，透明度 0.85
     return Cesium.Color.fromCssColorString('rgba(255, 0, 0, 0.85)')
   }
 }
@@ -180,28 +176,32 @@ onBeforeUnmount(() => {
     <div class="legend">
       <div class="legend-title">建筑高度分级</div>
       <div class="legend-item">
+        <span class="legend-color" style="background: rgba(65, 105, 225, 0.75)"></span>
+        <span>0-5m</span>
+      </div>
+      <div class="legend-item">
         <span class="legend-color" style="background: rgba(135, 206, 250, 0.75)"></span>
-        <span>0-10m</span>
+        <span>5-10m</span>
       </div>
       <div class="legend-item">
         <span class="legend-color" style="background: rgba(0, 206, 209, 0.75)"></span>
-        <span>10-20m</span>
+        <span>10-15m</span>
       </div>
       <div class="legend-item">
         <span class="legend-color" style="background: rgba(50, 205, 50, 0.75)"></span>
-        <span>20-30m</span>
+        <span>15-20m</span>
       </div>
       <div class="legend-item">
         <span class="legend-color" style="background: rgba(255, 215, 0, 0.78)"></span>
-        <span>30-40m</span>
+        <span>20-25m</span>
       </div>
       <div class="legend-item">
         <span class="legend-color" style="background: rgba(255, 165, 0, 0.8)"></span>
-        <span>40-50m</span>
+        <span>25-30m</span>
       </div>
       <div class="legend-item">
         <span class="legend-color" style="background: rgba(255, 0, 0, 0.85)"></span>
-        <span>&gt;50m</span>
+        <span>&gt;30m</span>
       </div>
     </div>
 

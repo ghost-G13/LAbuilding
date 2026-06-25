@@ -1,9 +1,8 @@
 <script setup>
-import CesiumScene from './components/CesiumScene.vue'
 </script>
 
 <template>
-  <CesiumScene />
+  <router-view />
 </template>
 
 <style>
