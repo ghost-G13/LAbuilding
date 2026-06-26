@@ -37,3 +37,8 @@ __screenshots__/
 
 # Vite
 *.timestamp-*-*.mjs
+
+# GeoJSON data files (ignore large files, allow sample)
+public/data/*.geojson
+public/data/*.json
+!public/data/la_clipped_sample.geojson
