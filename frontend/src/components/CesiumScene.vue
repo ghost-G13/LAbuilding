@@ -1,26 +1,25 @@
 <script setup>
-import { onMounted, onBeforeUnmount, ref } from 'vue'
+import { onMounted, onBeforeUnmount, ref, defineExpose } from 'vue'
 import * as Cesium from 'cesium'
 import 'cesium/Build/Cesium/Widgets/widgets.css'
 
-// 建筑数据文件路径（可配置）
 const BUILDING_GEOJSON_URL = '/data/la_height_filled.geojson'
+const NO_FLY_ZONE_URL = '/data/no_fly_zone.geojson'
 
 const cesiumContainer = ref(null)
 const buildingLoadingText = ref(`建筑白模：正在加载 ${BUILDING_GEOJSON_URL}`)
 const buildingCount = ref(0)
+const showLegend = ref(true)
 
 let viewer = null
 let buildingDataSource = null
+let noFlyZoneDataSource = null
+let colorMode = 'height'
 
-// 获取建筑高度，支持多种字段名
 function getEntityHeight(entity) {
   if (!entity.polygon) return 10
-
   const p = entity.properties
   if (!p) return 10
-
-  // 尝试多个可能的字段名
   const heightFields = ['height', 'building_height', 'Height', 'HEIGHT', 'buildingheight']
   for (const field of heightFields) {
     if (p[field] !== undefined && p[field] !== null) {
@@ -30,12 +29,9 @@ function getEntityHeight(entity) {
       }
     }
   }
-
-  // 默认高度
   return 10
 }
 
-// 根据高度返回颜色
 function getHeightColor(height) {
   if (height <= 5) {
     return Cesium.Color.fromCssColorString('rgba(65, 105, 225, 0.75)')
@@ -54,7 +50,6 @@ function getHeightColor(height) {
   }
 }
 
-// 加载建筑白模
 async function loadBuildingWhiteModel() {
   try {
     buildingDataSource = await Cesium.GeoJsonDataSource.load(BUILDING_GEOJSON_URL)
@@ -65,7 +60,7 @@ async function loadBuildingWhiteModel() {
       if (!entity.polygon) continue
 
       const height = getEntityHeight(entity)
-      const color = getHeightColor(height)
+      const color = colorMode === 'height' ? getHeightColor(height) : Cesium.Color.fromCssColorString('rgba(200, 200, 200, 0.75)')
 
       entity.polygon.height = 0
       entity.polygon.extrudedHeight = height
@@ -80,7 +75,6 @@ async function loadBuildingWhiteModel() {
     buildingCount.value = count
     buildingLoadingText.value = `建筑白模：已加载 ${count} 栋建筑`
 
-    // 输出加载信息到控制台
     console.log('建筑数据加载成功：')
     console.log('- 数据路径：', BUILDING_GEOJSON_URL)
     console.log('- 建筑 entity 数量：', count)
@@ -93,14 +87,12 @@ async function loadBuildingWhiteModel() {
       }
     }
 
-    // 飞到建筑数据范围
     try {
       await viewer.flyTo(buildingDataSource, {
         duration: 2,
         maximumHeight: 18000
       })
     } catch (e) {
-      // flyTo 失败时保留默认视角
       console.warn('飞向建筑数据范围失败，保留默认视角', e)
     }
   } catch (error) {
@@ -109,7 +101,54 @@ async function loadBuildingWhiteModel() {
   }
 }
 
-// 初始化 Cesium Viewer
+async function loadNoFlyZone() {
+  if (noFlyZoneDataSource) return
+  try {
+    noFlyZoneDataSource = await Cesium.GeoJsonDataSource.load(NO_FLY_ZONE_URL)
+    noFlyZoneDataSource.show = false
+    for (const entity of noFlyZoneDataSource.entities.values) {
+      if (entity.polygon) {
+        entity.polygon.height = 0
+        entity.polygon.extrudedHeight = 100
+        entity.polygon.material = Cesium.Color.fromCssColorString('rgba(229, 57, 53, 0.4)')
+        entity.polygon.outline = true
+        entity.polygon.outlineColor = Cesium.Color.fromCssColorString('rgba(229, 57, 53, 0.8)')
+      }
+    }
+    viewer.dataSources.add(noFlyZoneDataSource)
+    console.log('禁飞区数据加载成功')
+  } catch (error) {
+    console.error('加载禁飞区数据失败：', error)
+  }
+}
+
+function setColorLayer(enabled) {
+  colorMode = enabled ? 'height' : 'uniform'
+  showLegend.value = enabled
+  
+  if (buildingDataSource) {
+    for (const entity of buildingDataSource.entities.values) {
+      if (entity.polygon) {
+        const height = getEntityHeight(entity)
+        const color = enabled ? getHeightColor(height) : Cesium.Color.fromCssColorString('rgba(200, 200, 200, 0.75)')
+        entity.polygon.material = color
+      }
+    }
+  }
+}
+
+function setNoFlyZoneLayer(enabled) {
+  if (!noFlyZoneDataSource) {
+    loadNoFlyZone().then(() => {
+      if (noFlyZoneDataSource) {
+        noFlyZoneDataSource.show = enabled
+      }
+    })
+  } else {
+    noFlyZoneDataSource.show = enabled
+  }
+}
+
 function initCesiumViewer() {
   viewer = new Cesium.Viewer(cesiumContainer.value, {
     animation: false,
@@ -133,7 +172,6 @@ function initCesiumViewer() {
 
   viewer.cesiumWidget.creditContainer.style.display = 'none'
 
-  // 定位到洛杉矶市中心
   viewer.camera.setView({
     destination: Cesium.Cartesian3.fromDegrees(-118.2437, 34.0522, 18000),
     orientation: {
@@ -143,15 +181,15 @@ function initCesiumViewer() {
     },
   })
 
-  // 开启基础鼠标交互
   viewer.scene.screenSpaceCameraController.enableRotate = true
   viewer.scene.screenSpaceCameraController.enableZoom = true
   viewer.scene.screenSpaceCameraController.enablePan = true
   viewer.scene.screenSpaceCameraController.enableTilt = true
   viewer.scene.screenSpaceCameraController.enableLook = true
 
-  // 暴露到全局，方便调试
   window.cesiumViewer = viewer
+  window.setColorLayer = setColorLayer
+  window.setNoFlyZoneLayer = setNoFlyZoneLayer
 }
 
 onMounted(() => {
@@ -165,15 +203,18 @@ onBeforeUnmount(() => {
     viewer = null
   }
 })
+
+defineExpose({
+  setColorLayer,
+  setNoFlyZoneLayer
+})
 </script>
 
 <template>
   <div class="cesium-wrapper">
     <div ref="cesiumContainer" class="cesium-container"></div>
-    <div class="title">城市建筑三维白模浏览与查询系统</div>
 
-    <!-- 高度分级图例 -->
-    <div class="legend">
+    <div class="legend" v-show="showLegend">
       <div class="legend-title">建筑高度分级</div>
       <div class="legend-item">
         <span class="legend-color" style="background: rgba(65, 105, 225, 0.75)"></span>
@@ -223,22 +264,10 @@ onBeforeUnmount(() => {
   height: 100%;
 }
 
-.title {
-  position: absolute;
-  top: 20px;
-  left: 20px;
-  color: #ffffff;
-  font-size: 18px;
-  font-weight: bold;
-  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.7);
-  z-index: 10;
-  pointer-events: none;
-}
-
 .legend {
   position: absolute;
-  top: 20px;
-  right: 20px;
+  top: 80px;
+  left: 20px;
   background: rgba(0, 0, 0, 0.6);
   padding: 12px 16px;
   border-radius: 6px;
