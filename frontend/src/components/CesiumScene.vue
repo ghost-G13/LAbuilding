@@ -109,6 +109,7 @@ async function loadBuildingWhiteModel() {
     }
     
     setupBuildingClickHandler()
+    detectPropertyFields()
   } catch (error) {
     console.error('加载建筑白模失败：', error)
     buildingLoadingText.value = `建筑白模：加载失败，请检查 ${BUILDING_GEOJSON_URL}`
@@ -152,7 +153,7 @@ function setColorLayer(enabled) {
       const entity = entities[index]
       if (entity.polygon) {
         const height = getEntityHeight(entity)
-        const color = enabled ? getHeightColor(height) : Cesium.Color.fromCssColorString('rgba(200, 200, 200, 0.75)')
+        const color = enabled ? getHeightColor(height) : Cesium.Color.fromCssColorString('rgba(200, 200, 200, 0.3)')
         entity.polygon.material = color
       }
     }
@@ -260,6 +261,8 @@ function startDrawing() {
         drawingHandler = null
       }
       
+      drawnPolygonPositions = [...positions]
+      
       console.log('绘制完成，多边形顶点数:', positions.length)
       
       if (window.onDrawComplete) {
@@ -335,6 +338,7 @@ function clearDrawing() {
   pointEntities.forEach(pe => viewer.entities.remove(pe))
   pointEntities = []
   drawingHistory = []
+  drawnPolygonPositions = []
   document.removeEventListener('keydown', handleKeyDown)
   buildingLoadingText.value = '建筑白模：已加载 ' + buildingCount.value + ' 栋建筑'
 }
@@ -346,6 +350,10 @@ let areaField = null
 let selectedBuilding = null
 let selectedLabel = null
 let buildingClickHandler = null
+let drawnPolygonPositions = []
+let collisionBuildings = []
+let selectedNoFlyZone = null
+let selectedNoFlyZoneLabel = null
 
 function detectPropertyFields() {
   if (heightField && areaField) return
@@ -461,7 +469,7 @@ function filterBuildings(minHeight, maxHeight, minArea, maxArea) {
         }
       }
       
-      if (height >= minHeight && height <= maxHeight && area >= minArea && area <= maxArea) {
+      if (height >= minHeight && height <= maxHeight && area >= minArea) {
         filteredBuildings.push(entity)
         highlightList.push(entity)
         resultData.push({
@@ -477,27 +485,236 @@ function filterBuildings(minHeight, maxHeight, minArea, maxArea) {
     if (index < total) {
       setTimeout(processBatch, 0)
     } else {
-      highlightList.forEach(e => {
-        e.polygon.material = highlightColor
-        e.polygon.outline = true
-        e.polygon.outlineColor = highlightOutline
-        e.polygon.outlineWidth = 2
-      })
-      
-      dimList.forEach(e => {
-        e.polygon.material = dimColor
-        e.polygon.outline = false
-      })
-      
       if (filterCallback) {
         filterCallback({ count: resultData.length, data: resultData })
       }
+      
+      function applyColors() {
+        const colorBatchSize = 2000
+        let colorIndex = 0
+        
+        function applyColorBatch() {
+          const colorEnd = Math.min(colorIndex + colorBatchSize, highlightList.length)
+          for (; colorIndex < colorEnd; colorIndex++) {
+            const e = highlightList[colorIndex]
+            e.polygon.material = highlightColor
+            e.polygon.outline = true
+            e.polygon.outlineColor = highlightOutline
+            e.polygon.outlineWidth = 2
+          }
+          
+          if (colorIndex < highlightList.length) {
+            requestAnimationFrame(applyColorBatch)
+          } else {
+            let dimIndex = 0
+            function applyDimBatch() {
+              const dimEnd = Math.min(dimIndex + colorBatchSize, dimList.length)
+              for (; dimIndex < dimEnd; dimIndex++) {
+                const e = dimList[dimIndex]
+                e.polygon.material = dimColor
+                e.polygon.outline = false
+              }
+              if (dimIndex < dimList.length) {
+                requestAnimationFrame(applyDimBatch)
+              }
+            }
+            applyDimBatch()
+          }
+        }
+        
+        applyColorBatch()
+      }
+      
+      setTimeout(applyColors, 0)
     }
   }
   
   processBatch()
   
   return { count: 0, data: [] }
+}
+
+function pointInPolygon(point, polygonPoints) {
+  let inside = false
+  const n = polygonPoints.length
+  
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const xi = polygonPoints[i].x, yi = polygonPoints[i].y
+    const xj = polygonPoints[j].x, yj = polygonPoints[j].y
+    
+    if (((yi > point.y) !== (yj > point.y)) &&
+        (point.x < (xj - xi) * (point.y - yi) / (yj - yi) + xi)) {
+      inside = !inside
+    }
+  }
+  
+  return inside
+}
+
+function getPolygonCentroid(positions) {
+  let x = 0, y = 0, z = 0
+  const n = positions.length
+  
+  for (const pos of positions) {
+    x += pos.x
+    y += pos.y
+    z += pos.z
+  }
+  
+  return {
+    x: x / n,
+    y: y / n,
+    z: z / n
+  }
+}
+
+let collisionCallback = null
+
+function clearCollisionHighlight() {
+  collisionBuildings.forEach(entity => {
+    if (originalColors.has(entity)) {
+      entity.polygon.material = originalColors.get(entity)
+      entity.polygon.outline = false
+    }
+  })
+  collisionBuildings = []
+}
+
+function isInNoFlyZone() {
+  if (!noFlyZoneDataSource || drawnPolygonPositions.length < 3) return false
+  
+  const polygonPoints = drawnPolygonPositions.map(p => ({
+    x: p.x,
+    y: p.y
+  }))
+  
+  for (const entity of noFlyZoneDataSource.entities.values) {
+    if (!entity.polygon) continue
+    
+    const hierarchy = entity.polygon.hierarchy.getValue()
+    if (!hierarchy || !hierarchy.positions || hierarchy.positions.length === 0) continue
+    
+    const noFlyPoints = hierarchy.positions.map(p => ({
+      x: p.x,
+      y: p.y
+    }))
+    
+    for (const point of polygonPoints) {
+      if (pointInPolygon(point, noFlyPoints)) {
+        return true
+      }
+    }
+    
+    for (const point of noFlyPoints) {
+      if (pointInPolygon(point, polygonPoints)) {
+        return true
+      }
+    }
+  }
+  
+  return false
+}
+
+function checkRouteCollision(minHeight, maxHeight) {
+  if (!buildingDataSource || drawnPolygonPositions.length < 3) {
+    if (collisionCallback) collisionCallback({ compliant: true, count: 0, details: [] })
+    return { compliant: true, count: 0, details: [] }
+  }
+  
+  if (isInNoFlyZone()) {
+    if (collisionCallback) collisionCallback({ compliant: false, count: -1, details: [], inNoFlyZone: true })
+    return { compliant: false, count: -1, details: [], inNoFlyZone: true }
+  }
+  
+  clearCollisionHighlight()
+  
+  const polygonPoints = drawnPolygonPositions.map(p => ({
+    x: p.x,
+    y: p.y
+  }))
+  
+  const boundingSphere = Cesium.BoundingSphere.fromPoints(drawnPolygonPositions)
+  
+  const entities = buildingDataSource.entities.values
+  const entityArray = []
+  
+  for (const entity of entities) {
+    if (entity.polygon) {
+      entityArray.push(entity)
+    }
+  }
+  
+  const total = entityArray.length
+  let index = 0
+  let collisionCount = 0
+  const collisionDetails = []
+  const collisionEntities = []
+  
+  function processBatch() {
+    const batchSize = 5000
+    const end = Math.min(index + batchSize, total)
+    
+    for (; index < end; index++) {
+      const entity = entityArray[index]
+      
+      const polygon = entity.polygon
+      const hierarchy = polygon.hierarchy.getValue()
+      
+      if (!hierarchy || !hierarchy.positions || hierarchy.positions.length === 0) continue
+      
+      const buildingHeight = getEntityHeight(entity)
+      
+      if (buildingHeight >= minHeight) {
+        const centroid = getPolygonCentroid(hierarchy.positions)
+        
+        if (pointInPolygon(centroid, polygonPoints)) {
+          collisionCount++
+          collisionDetails.push({
+            id: entity.id,
+            height: buildingHeight,
+            minFlightHeight: minHeight
+          })
+          collisionEntities.push(entity)
+        }
+      }
+    }
+    
+    if (index < total) {
+      setTimeout(processBatch, 0)
+    } else {
+      const collisionColor = Cesium.Color.fromCssColorString('rgba(255, 0, 0, 0.9)')
+      const collisionOutline = Cesium.Color.fromCssColorString('#FF0000')
+      
+      collisionBuildings = []
+      
+      collisionEntities.forEach(entity => {
+        if (!originalColors.has(entity)) {
+          originalColors.set(entity, entity.polygon.material)
+        }
+        
+        entity.polygon.material = collisionColor
+        entity.polygon.outline = true
+        entity.polygon.outlineColor = collisionOutline
+        entity.polygon.outlineWidth = 3
+        
+        collisionBuildings.push(entity)
+      })
+      
+      const result = {
+        compliant: collisionCount === 0,
+        count: collisionCount,
+        details: collisionDetails
+      }
+      
+      if (collisionCallback) {
+        collisionCallback(result)
+      }
+    }
+  }
+  
+  processBatch()
+  
+  return { compliant: true, count: 0, details: [] }
 }
 
 function resetBuildingColors() {
@@ -514,6 +731,7 @@ function resetBuildingColors() {
   }
   
   filteredBuildings = []
+  collisionBuildings = []
   
   clearBuildingSelection()
 }
@@ -531,6 +749,17 @@ function clearBuildingSelection() {
     viewer.entities.remove(selectedLabel)
     selectedLabel = null
   }
+  
+  if (selectedNoFlyZone) {
+    selectedNoFlyZone.polygon.material = Cesium.Color.fromCssColorString('rgba(229, 57, 53, 0.4)')
+    selectedNoFlyZone.polygon.outlineColor = Cesium.Color.fromCssColorString('rgba(229, 57, 53, 0.8)')
+    selectedNoFlyZone = null
+  }
+  
+  if (selectedNoFlyZoneLabel) {
+    viewer.entities.remove(selectedNoFlyZoneLabel)
+    selectedNoFlyZoneLabel = null
+  }
 }
 
 function setupBuildingClickHandler() {
@@ -546,11 +775,72 @@ function setupBuildingClickHandler() {
     
     const entity = pickedObject.id
     
-    if (!buildingDataSource || !buildingDataSource.entities.contains(entity)) {
+    clearBuildingSelection()
+    
+    if (noFlyZoneDataSource && noFlyZoneDataSource.entities.contains(entity)) {
+      selectedNoFlyZone = entity
+      
+      const highlightColor = Cesium.Color.fromCssColorString('rgba(255, 193, 7, 0.6)')
+      const highlightOutline = Cesium.Color.fromCssColorString('#FFC107')
+      
+      selectedNoFlyZone.polygon.material = highlightColor
+      selectedNoFlyZone.polygon.outlineColor = highlightOutline
+      selectedNoFlyZone.polygon.outlineWidth = 4
+      
+      const name = entity.properties?.zone_name?.getValue() || '未命名禁飞区'
+      const area = getEntityArea(entity)
+      const note = entity.properties?.note?.getValue() || ''
+      
+      const wrapText = (text, maxLength) => {
+        if (!text) return ''
+        const result = []
+        let currentLine = ''
+        const words = text.split('')
+        for (const char of words) {
+          if ((currentLine + char).length > maxLength) {
+            result.push(currentLine)
+            currentLine = char
+          } else {
+            currentLine += char
+          }
+        }
+        if (currentLine) result.push(currentLine)
+        return result.join('\n')
+      }
+      
+      const wrappedName = wrapText(name, 12)
+      const wrappedNote = note ? `标注:\n${wrapText(note, 15)}` : ''
+      
+      const hierarchy = entity.polygon.hierarchy.getValue()
+      const center = getPolygonCentroid(hierarchy.positions)
+      const cartographic = Cesium.Cartographic.fromCartesian(center)
+      const longitude = Cesium.Math.toDegrees(cartographic.longitude)
+      const latitude = Cesium.Math.toDegrees(cartographic.latitude)
+      
+      selectedNoFlyZoneLabel = viewer.entities.add({
+        position: Cesium.Cartesian3.fromDegrees(longitude, latitude, 60),
+        label: {
+          text: `${wrappedName}\n面积: ${area.toFixed(1)}m²${wrappedNote ? `\n${wrappedNote}` : ''}`,
+          font: '10pt sans-serif',
+          fillColor: Cesium.Color.WHITE,
+          outlineColor: Cesium.Color.BLACK,
+          outlineWidth: 2,
+          style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+          verticalOrigin: Cesium.VerticalOrigin.CENTER,
+          horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+          pixelOffset: new Cesium.Cartesian2(0, -80),
+          showBackground: true,
+          backgroundColor: Cesium.Color.fromCssColorString('rgba(0, 0, 0, 0.7)'),
+          disableDepthTestDistance: Number.POSITIVE_INFINITY
+        }
+      })
+      
       return
     }
     
-    clearBuildingSelection()
+    if (!buildingDataSource || !buildingDataSource.entities.contains(entity)) {
+      return
+    }
     
     selectedBuilding = entity
     
@@ -645,6 +935,11 @@ function initCesiumViewer() {
   window.clearDrawing = clearDrawing
   window.filterBuildings = filterBuildings
   window.resetBuildingColors = resetBuildingColors
+  window.checkRouteCollision = checkRouteCollision
+  Object.defineProperty(window, 'collisionCallback', {
+    get: () => collisionCallback,
+    set: (val) => { collisionCallback = val }
+  })
 }
 
 onMounted(() => {
