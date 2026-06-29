@@ -4,12 +4,17 @@ try {
   console.log("dotenv not available, using environment variables");
 }
 
+if (!process.env.DB_PASSWORD) {
+  console.error("ERROR: DB_PASSWORD is not set in .env file");
+  process.exit(1);
+}
+
 module.exports = {
   development: {
     host: process.env.DB_HOST || "localhost",
     port: parseInt(process.env.DB_PORT) || 5432,
     database: process.env.DB_NAME || "la_build_db",
     user: process.env.DB_USER || "postgres",
-    password: process.env.DB_PASSWORD || "",
+    password: process.env.DB_PASSWORD,
   },
 };

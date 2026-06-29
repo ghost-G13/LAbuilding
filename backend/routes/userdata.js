@@ -2,15 +2,15 @@ const express = require("express");
 const router = express.Router();
 const { query } = require("../utils/db");
 
-// 保存查询记录
 router.post("/save", async (req, res) => {
   try {
-    const { user_id, query_type, query_params, result_count, result_data } = req.body;
+    const { query_type, query_params, result_count, result_data } = req.body;
+    const user_id = req.user.id;
 
-    if (!user_id || !query_type) {
+    if (!query_type) {
       return res.status(400).json({
         code: 400,
-        message: "用户ID和查询类型不能为空",
+        message: "查询类型不能为空",
       });
     }
 
@@ -43,28 +43,25 @@ router.post("/save", async (req, res) => {
   }
 });
 
-// 获取用户查询记录列表
-router.get("/list/:userId", async (req, res) => {
+router.get("/list", async (req, res) => {
   try {
-    const { userId } = req.params;
+    const user_id = req.user.id;
     const { query_type, page = 1, pageSize = 20 } = req.query;
 
     let sql = "SELECT id, user_id, query_type, query_params, result_count, created_at FROM userdata WHERE user_id = $1";
-    const params = [userId];
+    const params = [user_id];
 
     if (query_type) {
       params.push(query_type);
       sql += ` AND query_type = $${params.length}`;
     }
 
-    // 获取总数
     const countResult = await query(
       `SELECT COUNT(*) as total FROM (${sql}) as t`,
       params
     );
     const total = parseInt(countResult.rows[0].total);
 
-    // 分页查询
     const start = (Number(page) - 1) * Number(pageSize);
     sql += ` ORDER BY created_at DESC OFFSET ${start} LIMIT ${pageSize}`;
 
@@ -101,14 +98,14 @@ router.get("/list/:userId", async (req, res) => {
   }
 });
 
-// 获取单条查询记录详情
 router.get("/detail/:recordId", async (req, res) => {
   try {
     const { recordId } = req.params;
+    const user_id = req.user.id;
 
     const result = await query(
-      "SELECT id, user_id, query_type, query_params, result_count, result_data, created_at FROM userdata WHERE id = $1",
-      [recordId]
+      "SELECT id, user_id, query_type, query_params, result_count, result_data, created_at FROM userdata WHERE id = $1 AND user_id = $2",
+      [recordId, user_id]
     );
 
     if (result.rows.length === 0) {
@@ -143,12 +140,15 @@ router.get("/detail/:recordId", async (req, res) => {
   }
 });
 
-// 删除查询记录
 router.delete("/delete/:recordId", async (req, res) => {
   try {
     const { recordId } = req.params;
+    const user_id = req.user.id;
 
-    const result = await query("DELETE FROM userdata WHERE id = $1 RETURNING id", [recordId]);
+    const result = await query(
+      "DELETE FROM userdata WHERE id = $1 AND user_id = $2 RETURNING id",
+      [recordId, user_id]
+    );
 
     if (result.rows.length === 0) {
       return res.status(404).json({
