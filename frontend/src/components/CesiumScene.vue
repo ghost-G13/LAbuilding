@@ -15,11 +15,23 @@ let viewer = null
 let buildingDataSource = null
 let noFlyZoneDataSource = null
 let colorMode = 'height'
+let drawingHandler = null
+let drawnPolygon = null
+let drawingHistory = []
+let pointEntities = []
 
 function getEntityHeight(entity) {
   if (!entity.polygon) return 10
   const p = entity.properties
   if (!p) return 10
+  
+  if (heightField) {
+    const h = Number(p[heightField])
+    if (!isNaN(h) && h > 1) {
+      return h
+    }
+  }
+  
   const heightFields = ['height', 'building_height', 'Height', 'HEIGHT', 'buildingheight']
   for (const field of heightFields) {
     if (p[field] !== undefined && p[field] !== null) {
@@ -95,6 +107,8 @@ async function loadBuildingWhiteModel() {
     } catch (e) {
       console.warn('飞向建筑数据范围失败，保留默认视角', e)
     }
+    
+    setupBuildingClickHandler()
   } catch (error) {
     console.error('加载建筑白模失败：', error)
     buildingLoadingText.value = `建筑白模：加载失败，请检查 ${BUILDING_GEOJSON_URL}`
@@ -126,15 +140,31 @@ function setColorLayer(enabled) {
   colorMode = enabled ? 'height' : 'uniform'
   showLegend.value = enabled
   
-  if (buildingDataSource) {
-    for (const entity of buildingDataSource.entities.values) {
+  if (!buildingDataSource) return
+  
+  const entities = buildingDataSource.entities.values
+  const batchSize = 500
+  let index = 0
+  
+  function updateBatch() {
+    const end = Math.min(index + batchSize, entities.length)
+    for (; index < end; index++) {
+      const entity = entities[index]
       if (entity.polygon) {
         const height = getEntityHeight(entity)
         const color = enabled ? getHeightColor(height) : Cesium.Color.fromCssColorString('rgba(200, 200, 200, 0.75)')
         entity.polygon.material = color
       }
     }
+    
+    if (index < entities.length) {
+      requestAnimationFrame(updateBatch)
+    } else {
+      console.log('分层设色切换完成，共更新', entities.length, '个实体')
+    }
   }
+  
+  requestAnimationFrame(updateBatch)
 }
 
 function setNoFlyZoneLayer(enabled) {
@@ -146,6 +176,427 @@ function setNoFlyZoneLayer(enabled) {
     })
   } else {
     noFlyZoneDataSource.show = enabled
+  }
+}
+
+function startDrawing() {
+  if (!viewer) return
+  
+  if (drawnPolygon) {
+    viewer.entities.remove(drawnPolygon)
+    drawnPolygon = null
+  }
+  
+  if (drawingHandler) {
+    drawingHandler.destroy()
+  }
+  
+  drawingHistory = []
+  
+  drawingHandler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas)
+  
+  const positions = []
+  pointEntities = []
+  let tempEntity = null
+  
+  drawingHandler.setInputAction((click) => {
+    const cartesian = viewer.camera.pickEllipsoid(click.position, viewer.scene.globe.ellipsoid)
+    if (cartesian) {
+      drawingHistory.push({
+        positions: [...positions],
+        pointEntities: [...pointEntities]
+      })
+      
+      positions.push(cartesian)
+      
+      const pointEntity = viewer.entities.add({
+        position: cartesian,
+        point: {
+          pixelSize: 8,
+          color: Cesium.Color.fromCssColorString('#34d399'),
+          outlineColor: Cesium.Color.WHITE,
+          outlineWidth: 2
+        }
+      })
+      pointEntities.push(pointEntity)
+      
+      if (positions.length >= 2) {
+        if (tempEntity) {
+          viewer.entities.remove(tempEntity)
+        }
+        tempEntity = viewer.entities.add({
+          polyline: {
+            positions: [...positions],
+            width: 2,
+            material: Cesium.Color.YELLOW
+          }
+        })
+      }
+    }
+  }, Cesium.ScreenSpaceEventType.LEFT_CLICK)
+  
+  drawingHandler.setInputAction((click) => {
+    if (positions.length >= 3) {
+      positions.push(positions[0])
+      
+      if (tempEntity) {
+        viewer.entities.remove(tempEntity)
+      }
+      
+      pointEntities.forEach(pe => viewer.entities.remove(pe))
+      
+      drawnPolygon = viewer.entities.add({
+        polygon: {
+          hierarchy: new Cesium.PolygonHierarchy(positions),
+          material: Cesium.Color.fromCssColorString('rgba(52, 211, 153, 0.4)'),
+          outline: true,
+          outlineColor: Cesium.Color.fromCssColorString('#34d399'),
+          outlineWidth: 2
+        }
+      })
+      
+      if (drawingHandler) {
+        drawingHandler.destroy()
+        drawingHandler = null
+      }
+      
+      console.log('绘制完成，多边形顶点数:', positions.length)
+      
+      if (window.onDrawComplete) {
+        window.onDrawComplete(positions)
+      }
+    }
+  }, Cesium.ScreenSpaceEventType.RIGHT_CLICK)
+  
+  document.addEventListener('keydown', handleKeyDown)
+  
+  buildingLoadingText.value = '绘制模式：点击地图添加顶点，右键结束绘制，Ctrl+Z撤销'
+}
+
+function handleKeyDown(e) {
+  if (e.ctrlKey && e.key === 'z') {
+    e.preventDefault()
+    undoDrawing()
+  }
+}
+
+function undoDrawing() {
+  if (!drawingHandler || drawingHistory.length === 0) return
+  
+  const history = drawingHistory.pop()
+  const newPositions = history.positions
+  const newPointEntities = history.pointEntities
+  
+  pointEntities.forEach(pe => viewer.entities.remove(pe))
+  pointEntities.length = 0
+  
+  const existingPolyline = viewer.entities.values.find(e => e.polyline)
+  if (existingPolyline) {
+    viewer.entities.remove(existingPolyline)
+  }
+  
+  newPointEntities.forEach(pe => {
+    pointEntities.push(viewer.entities.add({
+      position: pe.position.getValue(Cesium.JulianDate.now()),
+      point: {
+        pixelSize: 8,
+        color: Cesium.Color.fromCssColorString('#34d399'),
+        outlineColor: Cesium.Color.WHITE,
+        outlineWidth: 2
+      }
+    }))
+  })
+  
+  if (newPositions.length >= 2) {
+    viewer.entities.add({
+      polyline: {
+        positions: [...newPositions],
+        width: 2,
+        material: Cesium.Color.YELLOW
+      }
+    })
+  }
+  
+  positions.length = 0
+  positions.push(...newPositions)
+  
+  console.log('撤销后顶点数:', positions.length)
+}
+
+function clearDrawing() {
+  if (drawnPolygon) {
+    viewer.entities.remove(drawnPolygon)
+    drawnPolygon = null
+  }
+  if (drawingHandler) {
+    drawingHandler.destroy()
+    drawingHandler = null
+  }
+  pointEntities.forEach(pe => viewer.entities.remove(pe))
+  pointEntities = []
+  drawingHistory = []
+  document.removeEventListener('keydown', handleKeyDown)
+  buildingLoadingText.value = '建筑白模：已加载 ' + buildingCount.value + ' 栋建筑'
+}
+
+let originalColors = new Map()
+let filteredBuildings = []
+let heightField = null
+let areaField = null
+let selectedBuilding = null
+let selectedLabel = null
+let buildingClickHandler = null
+
+function detectPropertyFields() {
+  if (heightField && areaField) return
+  
+  const entities = buildingDataSource.entities.values
+  for (const entity of entities) {
+    if (!entity.polygon || !entity.properties) continue
+    
+    const p = entity.properties
+    
+    if (!heightField) {
+      const hFields = ['height', 'building_height', 'Height', 'HEIGHT', 'buildingheight']
+      for (const f of hFields) {
+        if (p[f] !== undefined && p[f] !== null) {
+          heightField = f
+          break
+        }
+      }
+    }
+    
+    if (!areaField) {
+      const aFields = ['area', 'area_m2', 'AREA', 'Area', 'building_area', 'area_m']
+      for (const f of aFields) {
+        if (p[f] !== undefined && p[f] !== null) {
+          areaField = f
+          break
+        }
+      }
+    }
+    
+    if (heightField && areaField) break
+  }
+}
+
+function getEntityArea(entity) {
+  if (!entity.polygon) return 0
+  const p = entity.properties
+  if (!p) return 0
+  
+  if (areaField) {
+    const val = p[areaField]
+    if (val !== undefined && val !== null) {
+      const num = Number(val)
+      return isNaN(num) ? 0 : num
+    }
+  }
+  
+  const areaFields = ['area', 'area_m2', 'AREA', 'Area', 'building_area', 'area_m']
+  for (const field of areaFields) {
+    const val = p[field]
+    if (val !== undefined && val !== null) {
+      const num = Number(val)
+      return isNaN(num) ? 0 : num
+    }
+  }
+  return 0
+}
+
+let filterCallback = null
+
+function filterBuildings(minHeight, maxHeight, minArea, maxArea) {
+  if (!buildingDataSource) {
+    if (filterCallback) filterCallback({ count: 0, data: [] })
+    return { count: 0, data: [] }
+  }
+  
+  detectPropertyFields()
+  
+  filteredBuildings = []
+  
+  const highlightColor = Cesium.Color.fromCssColorString('rgba(0, 255, 128, 0.8)')
+  const highlightOutline = Cesium.Color.fromCssColorString('#00FF80')
+  const dimColor = Cesium.Color.fromCssColorString('rgba(200, 200, 200, 0.3)')
+  
+  const entities = buildingDataSource.entities.values
+  const entityArray = []
+  
+  for (const entity of entities) {
+    if (entity.polygon) {
+      entityArray.push(entity)
+    }
+  }
+  
+  const total = entityArray.length
+  let index = 0
+  const resultData = []
+  const highlightList = []
+  const dimList = []
+  
+  function processBatch() {
+    const batchSize = 5000
+    const end = Math.min(index + batchSize, total)
+    
+    for (; index < end; index++) {
+      const entity = entityArray[index]
+      
+      if (!originalColors.has(entity)) {
+        originalColors.set(entity, entity.polygon.material)
+      }
+      
+      const p = entity.properties
+      let height = 10
+      let area = 0
+      
+      if (p) {
+        if (heightField) {
+          height = Number(p[heightField])
+          if (isNaN(height) || height <= 1) height = 10
+        }
+        if (areaField) {
+          area = Number(p[areaField])
+          if (isNaN(area)) area = 0
+        }
+      }
+      
+      if (height >= minHeight && height <= maxHeight && area >= minArea && area <= maxArea) {
+        filteredBuildings.push(entity)
+        highlightList.push(entity)
+        resultData.push({
+          height: height,
+          area: area,
+          id: entity.id
+        })
+      } else {
+        dimList.push(entity)
+      }
+    }
+    
+    if (index < total) {
+      setTimeout(processBatch, 0)
+    } else {
+      highlightList.forEach(e => {
+        e.polygon.material = highlightColor
+        e.polygon.outline = true
+        e.polygon.outlineColor = highlightOutline
+        e.polygon.outlineWidth = 2
+      })
+      
+      dimList.forEach(e => {
+        e.polygon.material = dimColor
+        e.polygon.outline = false
+      })
+      
+      if (filterCallback) {
+        filterCallback({ count: resultData.length, data: resultData })
+      }
+    }
+  }
+  
+  processBatch()
+  
+  return { count: 0, data: [] }
+}
+
+function resetBuildingColors() {
+  if (!buildingDataSource) return
+  
+  const entities = buildingDataSource.entities.values
+  for (const entity of entities) {
+    if (!entity.polygon) continue
+    
+    if (originalColors.has(entity)) {
+      entity.polygon.material = originalColors.get(entity)
+      entity.polygon.outline = false
+    }
+  }
+  
+  filteredBuildings = []
+  
+  clearBuildingSelection()
+}
+
+function clearBuildingSelection() {
+  if (selectedBuilding) {
+    if (originalColors.has(selectedBuilding)) {
+      selectedBuilding.polygon.material = originalColors.get(selectedBuilding)
+      selectedBuilding.polygon.outline = false
+    }
+    selectedBuilding = null
+  }
+  
+  if (selectedLabel) {
+    viewer.entities.remove(selectedLabel)
+    selectedLabel = null
+  }
+}
+
+function setupBuildingClickHandler() {
+  buildingClickHandler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas)
+  
+  buildingClickHandler.setInputAction(function(click) {
+    const pickedObject = viewer.scene.pick(click.position)
+    
+    if (!pickedObject || !pickedObject.id || !pickedObject.id.polygon) {
+      clearBuildingSelection()
+      return
+    }
+    
+    const entity = pickedObject.id
+    
+    if (!buildingDataSource || !buildingDataSource.entities.contains(entity)) {
+      return
+    }
+    
+    clearBuildingSelection()
+    
+    selectedBuilding = entity
+    
+    if (!originalColors.has(selectedBuilding)) {
+      originalColors.set(selectedBuilding, selectedBuilding.polygon.material)
+    }
+    
+    const selectColor = Cesium.Color.fromCssColorString('rgba(255, 69, 0, 0.9)')
+    selectedBuilding.polygon.material = selectColor
+    selectedBuilding.polygon.outline = true
+    selectedBuilding.polygon.outlineColor = Cesium.Color.fromCssColorString('#FF4500')
+    selectedBuilding.polygon.outlineWidth = 3
+    
+    const height = getEntityHeight(entity)
+    const area = getEntityArea(entity)
+    
+    const position = entity.polygon.hierarchy._value.positions[0]
+    const cartographic = Cesium.Cartographic.fromCartesian(position)
+    const longitude = Cesium.Math.toDegrees(cartographic.longitude)
+    const latitude = Cesium.Math.toDegrees(cartographic.latitude)
+    const elevation = cartographic.height + height / 2
+    
+    selectedLabel = viewer.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(longitude, latitude, elevation),
+      label: {
+        text: `高度: ${height.toFixed(1)}m\n面积: ${area.toFixed(1)}m²`,
+        font: '14pt sans-serif',
+        fillColor: Cesium.Color.WHITE,
+        outlineColor: Cesium.Color.BLACK,
+        outlineWidth: 2,
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        verticalOrigin: Cesium.VerticalOrigin.CENTER,
+        horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+        pixelOffset: new Cesium.Cartesian2(0, -40),
+        showBackground: true,
+        backgroundColor: Cesium.Color.fromCssColorString('rgba(0, 0, 0, 0.7)')
+      }
+    })
+    
+  }, Cesium.ScreenSpaceEventType.LEFT_CLICK)
+}
+
+function clearBuildingClickHandler() {
+  if (buildingClickHandler) {
+    buildingClickHandler.destroy()
+    buildingClickHandler = null
   }
 }
 
@@ -190,6 +641,10 @@ function initCesiumViewer() {
   window.cesiumViewer = viewer
   window.setColorLayer = setColorLayer
   window.setNoFlyZoneLayer = setNoFlyZoneLayer
+  window.startDrawing = startDrawing
+  window.clearDrawing = clearDrawing
+  window.filterBuildings = filterBuildings
+  window.resetBuildingColors = resetBuildingColors
 }
 
 onMounted(() => {
@@ -198,6 +653,9 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  clearBuildingSelection()
+  clearBuildingClickHandler()
+  
   if (viewer) {
     viewer.destroy()
     viewer = null
