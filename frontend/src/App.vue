@@ -1,14 +1,27 @@
 <script setup>
 import { ref, watch, onMounted, computed } from 'vue'
 
+const isNavCompact = ref(false)
+
 const flightHeightMin = ref('')
 const flightHeightMax = ref('')
 const areaMin = ref('')
 const areaMax = ref('')
 
 const isInputComplete = computed(() => {
-  return flightHeightMin.value.trim() && flightHeightMax.value.trim() && areaMin.value.trim() && areaMax.value.trim()
+  return flightHeightMin.value.trim() && flightHeightMax.value.trim() && areaMin.value.trim()
 })
+
+const validateRange = (minRef, maxRef) => {
+  const minVal = parseFloat(minRef.value)
+  const maxVal = parseFloat(maxRef.value)
+  
+  if (!isNaN(minVal) && !isNaN(maxVal)) {
+    if (maxVal < minVal) {
+      maxRef.value = String(minVal)
+    }
+  }
+}
 
 const filteredCount = ref(0)
 const hasFiltered = ref(false)
@@ -19,6 +32,7 @@ const collisionHeightMax = ref('')
 const warningStatus = ref('compliant')
 const isDrawn = ref(false)
 const isDrawing = ref(false)
+const isCheckingCollision = ref(false)
 
 const noFlyZoneLayer = ref(false)
 const colorLayer = ref(true)
@@ -170,15 +184,24 @@ const filterTakeoffPoints = () => {
   const maxA = parseFloat(areaMax.value)
   
   if (window.filterBuildings) {
+    hasFiltered.value = true
+    filteredCount.value = -1
+    
     window.filterCallback = (result) => {
       filteredCount.value = result.count
       filteredData.value = result.data
-      hasFiltered.value = true
     }
     window.filterBuildings(minH, maxH, minA, maxA)
-    hasFiltered.value = true
-    filteredCount.value = -1
   }
+}
+
+const clearFilter = () => {
+  if (window.resetBuildingColors) {
+    window.resetBuildingColors()
+  }
+  hasFiltered.value = false
+  filteredCount.value = 0
+  filteredData.value = []
 }
 
 const exportResults = () => {
@@ -219,7 +242,27 @@ const clearDraw = () => {
 window.onDrawComplete = () => {
   isDrawn.value = true
   isDrawing.value = false
-  warningStatus.value = 'compliant'
+  warningStatus.value = 'input_height'
+}
+
+function checkCollision() {
+  if (!isDrawn.value) return
+  
+  const minH = parseFloat(collisionHeightMin.value) || 0
+  const maxH = parseFloat(collisionHeightMax.value) || 0
+  
+  if (window.checkRouteCollision) {
+    isCheckingCollision.value = true
+    window.collisionCallback = (result) => {
+      if (result.inNoFlyZone) {
+        warningStatus.value = 'no_fly_zone'
+      } else {
+        warningStatus.value = result.compliant ? 'compliant' : 'warning'
+      }
+      isCheckingCollision.value = false
+    }
+    window.checkRouteCollision(minH, maxH)
+  }
 }
 
 watch(colorLayer, (val) => {
@@ -233,6 +276,18 @@ watch(noFlyZoneLayer, (val) => {
     window.setNoFlyZoneLayer(val)
   }
 })
+
+const validateFlightHeight = () => {
+  validateRange(flightHeightMin, flightHeightMax)
+}
+
+const validateArea = () => {
+  validateRange(areaMin, areaMax)
+}
+
+const validateCollisionHeight = () => {
+  validateRange(collisionHeightMin, collisionHeightMax)
+}
 
 onMounted(() => {
   if (window.setColorLayer) {
@@ -263,34 +318,49 @@ onMounted(() => {
 
 <template>
   <div class="app-container">
-    <header class="top-nav">
-      <div class="nav-left">
-        <div class="logo-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5 12 2"></polygon>
-            <line x1="12" y1="22" x2="12" y2="15.5"></line>
-            <polyline points="22 8.5 12 15.5 2 8.5"></polyline>
-            <polyline points="2 15.5 12 8.5 22 15.5"></polyline>
-            <line x1="12" y1="2" x2="12" y2="8.5"></line>
-          </svg>
-        </div>
-        <span class="system-title">城市低空三维白模可视化与分析系统</span>
+    <header 
+      class="top-nav" 
+      :class="{ 'nav-compact': isNavCompact }"
+      @mouseenter="isNavCompact = false"
+      @mouseleave="isNavCompact = true"
+    >
+      <div class="nav-particles">
+        <div v-for="n in 20" :key="n" class="particle" :style="{
+          left: `${Math.random() * 100}%`,
+          animationDelay: `${Math.random() * 5}s`,
+          animationDuration: `${3 + Math.random() * 4}s`,
+          size: `${2 + Math.random() * 3}px`
+        }"></div>
       </div>
-      <div class="nav-right">
-        <button class="nav-btn" @click="checkLogin">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="3"></circle>
-            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-          </svg>
-          <span>Setting</span>
-        </button>
-        <button class="nav-btn" @click="showLoginModal = true">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
-            <circle cx="12" cy="7" r="4"></circle>
-          </svg>
-          <span>Login</span>
-        </button>
+      <div class="nav-content">
+        <div class="nav-left">
+          <div class="logo-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5 12 2"></polygon>
+              <line x1="12" y1="22" x2="12" y2="15.5"></line>
+              <polyline points="22 8.5 12 15.5 2 8.5"></polyline>
+              <polyline points="2 15.5 12 8.5 22 15.5"></polyline>
+              <line x1="12" y1="2" x2="12" y2="8.5"></line>
+            </svg>
+          </div>
+          <span class="system-title">城市低空三维白模可视化与分析系统</span>
+        </div>
+        <div class="nav-right">
+          <button class="nav-btn" @click="checkLogin">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="3"></circle>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+            </svg>
+            <span>设置</span>
+          </button>
+          <button class="nav-btn" @click="showLoginModal = true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+              <circle cx="12" cy="7" r="4"></circle>
+            </svg>
+            <span>登录</span>
+          </button>
+        </div>
       </div>
     </header>
     
@@ -303,20 +373,18 @@ onMounted(() => {
         <h2 class="module-title">01 起降点分析</h2>
         
         <div class="input-group">
-          <label class="input-label">输入飞行高度</label>
+          <label class="input-label">输入飞行高度(m)</label>
           <div class="range-input">
             <input type="text" v-model="flightHeightMin" class="input-box" placeholder="最小值">
-            <span class="range-separator">-</span>
-            <input type="text" v-model="flightHeightMax" class="input-box" placeholder="最大值">
+          <span class="range-separator">-</span>
+          <input type="text" v-model="flightHeightMax" class="input-box" placeholder="最大值">
           </div>
         </div>
         
         <div class="input-group">
-          <label class="input-label">输入面积条件</label>
+          <label class="input-label">输入面积要求(m²)</label>
           <div class="range-input">
-            <input type="text" v-model="areaMin" class="input-box" placeholder="最小值">
-            <span class="range-separator">-</span>
-            <input type="text" v-model="areaMax" class="input-box" placeholder="最大值">
+            <input type="text" v-model="areaMin" class="input-box" placeholder="最低面积">
           </div>
         </div>
         
@@ -326,8 +394,13 @@ onMounted(() => {
           <p class="result-text" v-else-if="filteredCount === -1">筛选中...</p>
           <p class="result-text" v-else>已筛选出符合条件的起降点位：共 <span>{{ filteredCount }}</span> 个</p>
           <div class="result-actions">
-            <button class="action-btn" @click="filterTakeoffPoints" :disabled="!isInputComplete">筛选</button>
-            <button class="action-btn" @click="exportResults" :disabled="!hasFiltered">导出结果</button>
+            <div class="action-row">
+              <button class="action-btn" @click="clearFilter" :disabled="!hasFiltered">清除筛选</button>
+              <button class="action-btn" @click="filterTakeoffPoints" :disabled="!isInputComplete">筛选</button>
+            </div>
+            <div class="action-row">
+              <button class="action-btn" @click="exportResults" :disabled="!hasFiltered">导出结果</button>
+            </div>
           </div>
         </div>
       </div>
@@ -341,18 +414,24 @@ onMounted(() => {
         </div>
         
         <div class="input-group">
-          <label class="input-label">飞行高度区间</label>
+          <label class="input-label">飞行高度区间(m)</label>
           <div class="range-input">
-            <input type="text" v-model="collisionHeightMin" class="input-box" placeholder="最小值">
-            <span class="range-separator">-</span>
-            <input type="text" v-model="collisionHeightMax" class="input-box" placeholder="最大值">
+            <input type="text" v-model="collisionHeightMin" class="input-box" placeholder="最小值" @blur="validateCollisionHeight">
+          <span class="range-separator">-</span>
+          <input type="text" v-model="collisionHeightMax" class="input-box" placeholder="最大值" @blur="validateCollisionHeight">
           </div>
         </div>
         
+        <div class="result-area">
+          <button class="action-btn" @click="checkCollision" :disabled="!isDrawn || !collisionHeightMin || !collisionHeightMax || isCheckingCollision">
+            {{ isCheckingCollision ? '检测中…' : '检测碰撞' }}
+          </button>
+        </div>
+        
         <div class="warning-area">
-          <div class="warning-status" :class="{ 'not-drawn': !isDrawn && !isDrawing, 'compliant': isDrawn && warningStatus === 'compliant', 'warning': isDrawn && warningStatus === 'warning', 'drawing': isDrawing }">
-            <span class="status-icon">{{ isDrawing ? '✏️' : (!isDrawn ? '📋' : (warningStatus === 'compliant' ? '✓' : '⚠')) }}</span>
-            <span class="status-text">{{ isDrawing ? '绘制中…' : (!isDrawn ? '请绘制' : (warningStatus === 'compliant' ? '合规' : '碰撞告警')) }}</span>
+          <div class="warning-status" :class="{ 'not-drawn': !isDrawn && !isDrawing, 'compliant': isDrawn && !isCheckingCollision && warningStatus === 'compliant', 'warning': isDrawn && !isCheckingCollision && warningStatus === 'warning', 'no-fly-zone': isDrawn && !isCheckingCollision && warningStatus === 'no_fly_zone', 'input-height': isDrawn && !isCheckingCollision && warningStatus === 'input_height', 'drawing': isDrawing, 'checking': isCheckingCollision }">
+            <span class="status-icon">{{ isCheckingCollision ? '🔍' : (isDrawing ? '✏️' : (!isDrawn ? '📋' : (warningStatus === 'input_height' ? '📝' : (warningStatus === 'no_fly_zone' ? '🚫' : (warningStatus === 'compliant' ? '✓' : '⚠'))))) }}</span>
+            <span class="status-text">{{ isCheckingCollision ? '检测中…' : (isDrawing ? '绘制中…' : (!isDrawn ? '请绘制' : (warningStatus === 'input_height' ? '请输入飞行高度' : (warningStatus === 'no_fly_zone' ? '警告：位于禁飞区内！' : (warningStatus === 'compliant' ? '合规' : '碰撞告警'))))) }}</span>
           </div>
           <div class="draw-actions" v-if="isDrawn">
             <button class="action-btn small" @click="drawRange">再次绘制</button>
@@ -613,16 +692,75 @@ html, body, #app {
   justify-content: space-between;
   align-items: center;
   padding: 12px 32px;
-  background: linear-gradient(135deg, rgba(148, 184, 224, 0.95) 0%, rgba(100, 150, 200, 0.95) 100%);
+  background: linear-gradient(90deg, rgba(148, 184, 224, 0.95) 0%, rgba(60, 100, 160, 0.95) 50%, rgba(40, 70, 120, 0.95) 100%);
   z-index: 200;
   box-shadow: 0 2px 20px rgba(0, 0, 0, 0.15);
   backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-bottom: none;
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+}
+
+.top-nav.nav-compact {
+  padding: 10px 30px;
+}
+
+.top-nav.nav-compact .logo-icon {
+  transform: scale(0.9);
+}
+
+.nav-particles {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.particle {
+  position: absolute;
+  top: -10px;
+  width: 4px;
+  height: 4px;
+  background: radial-gradient(circle, rgba(100, 200, 255, 0.8) 0%, rgba(100, 200, 255, 0) 70%);
+  border-radius: 50%;
+  animation: particleFloat linear infinite;
+}
+
+@keyframes particleFloat {
+  0% {
+    transform: translateY(0) translateX(0);
+    opacity: 0;
+  }
+  10% {
+    opacity: 0.8;
+  }
+  90% {
+    opacity: 0.8;
+  }
+  100% {
+    transform: translateY(80px) translateX(20px);
+    opacity: 0;
+  }
+}
+
+.nav-content {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
 }
 
 .nav-left {
   display: flex;
   align-items: center;
   gap: 12px;
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .logo-icon {
@@ -635,6 +773,12 @@ html, body, #app {
   background: rgba(255, 255, 255, 0.2);
   border-radius: 8px;
   padding: 4px;
+  transition: all 0.3s ease;
+}
+
+.logo-icon:hover {
+  background: rgba(255, 255, 255, 0.3);
+  transform: scale(1.05);
 }
 
 .logo-icon svg {
@@ -645,9 +789,14 @@ html, body, #app {
 .system-title {
   font-size: 18px;
   font-weight: bold;
-  color: #ffffff;
-  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.1);
   letter-spacing: 1px;
+  background: linear-gradient(135deg, #ffffff 0%, #e0f0ff 50%, #ffffff 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  text-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  white-space: nowrap;
 }
 
 .nav-right {
@@ -662,24 +811,50 @@ html, body, #app {
   padding: 8px 16px;
   border: none;
   border-radius: 20px;
-  background-color: rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.1);
   color: #ffffff;
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.3s ease;
-  backdrop-filter: blur(4px);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  position: relative;
+  overflow: hidden;
+}
+
+.nav-btn::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+  transition: left 0.5s ease;
 }
 
 .nav-btn:hover {
-  background-color: rgba(255, 255, 255, 0.4);
+  background: rgba(255, 255, 255, 0.2);
+  color: #ffffff;
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.nav-btn:hover::before {
+  left: 100%;
 }
 
 .nav-btn svg {
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
+  transition: transform 0.3s ease;
+}
+
+.nav-btn:hover svg {
+  transform: scale(1.1);
 }
 
 .map-container {
@@ -732,6 +907,14 @@ html, body, #app {
   padding: 18px;
   backdrop-filter: blur(8px);
   box-sizing: border-box;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+}
+
+.function-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+  background-color: rgba(255, 255, 255, 0.92);
 }
 
 .module-title {
@@ -811,7 +994,15 @@ html, body, #app {
 
 .result-actions {
   display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+}
+
+.action-row {
+  display: flex;
   gap: 10px;
+  justify-content: center;
 }
 
 .action-btn {
@@ -933,6 +1124,43 @@ html, body, #app {
   color: #444444;
 }
 
+.warning-status.input-height {
+  background-color: rgba(156, 39, 176, 0.15);
+}
+
+.warning-status.input-height .status-icon {
+  color: #9C27B0;
+}
+
+.warning-status.input-height .status-text {
+  color: #7B1FA2;
+}
+
+.warning-status.no-fly-zone {
+  background-color: rgba(229, 57, 53, 0.2);
+  border-color: rgba(229, 57, 53, 0.5);
+}
+
+.warning-status.no-fly-zone .status-icon {
+  color: #E53935;
+}
+
+.warning-status.no-fly-zone .status-text {
+  color: #C62828;
+}
+
+.warning-status.checking {
+  background-color: rgba(255, 152, 0, 0.15);
+}
+
+.warning-status.checking .status-icon {
+  color: #FF9800;
+}
+
+.warning-status.checking .status-text {
+  color: #E65100;
+}
+
 .warning-status.warning .status-text {
   color: #E53935;
 }
@@ -959,6 +1187,14 @@ html, body, #app {
   border-radius: 8px;
   padding: 10px 14px;
   backdrop-filter: blur(4px);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.layer-section:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
+  background-color: rgba(255, 255, 255, 0.85);
 }
 
 .layer-section.orange-bg {
@@ -990,6 +1226,14 @@ html, body, #app {
   padding: 14px;
   text-align: center;
   backdrop-filter: blur(4px);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.stats-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
+  background-color: rgba(232, 248, 245, 0.9);
 }
 
 .stats-label {
