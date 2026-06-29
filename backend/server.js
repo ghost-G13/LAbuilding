@@ -6,6 +6,8 @@ const uavRoutes = require("./routes/uav");
 const noflyRoutes = require("./routes/nofly");
 const authRoutes = require("./routes/auth");
 const userdataRoutes = require("./routes/userdata");
+const adminRoutes = require("./routes/admin");
+const { authMiddleware } = require("./middleware/auth");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -17,12 +19,16 @@ app.use((req, res, next) => {
   next();
 });
 
+app.use("/api/auth", authRoutes);
+
+app.use(authMiddleware);
+
 app.use("/api/buildings", buildingRoutes);
 app.use("/api/build", takeoffRoutes);
 app.use("/api/uav", uavRoutes);
 app.use("/api/nofly", noflyRoutes);
-app.use("/api/auth", authRoutes);
 app.use("/api/userdata", userdataRoutes);
+app.use("/api/admin", adminRoutes);
 
 app.get("/", (req, res) => {
   res.json({ message: "建筑属性查询服务运行中" });

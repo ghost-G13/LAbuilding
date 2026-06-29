@@ -4,21 +4,98 @@
 - **服务地址**: http://localhost:3000
 - **数据格式**: JSON
 - **字符编码**: UTF-8
+- **认证方式**: JWT Token（请求头 `Authorization: Bearer <token>`）
+
+> **重要**: 除 `/api/auth/*` 接口外，所有接口都需要登录认证，未登录返回 401。
 
 ---
 
-## 用户认证接口 (/api/auth)
+## 一、用户认证接口 (/api/auth)
 
-### 1. 用户登录
+### 1. 获取图形验证码
+- **URL**: `/api/auth/captcha`
+- **方法**: GET
+- **不需要登录**
+- **响应**:
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "image": "<svg>...</svg>",
+    "captcha_key": "captcha:1782720338863",
+    "expires_in": 120
+  }
+}
+```
+- **说明**: 
+  - `image` 是 SVG 图片，直接插入页面显示
+  - `captcha_key` 需在登录时传回
+  - 验证码有效期 120 秒，使用后立即失效
+
+### 2. 发送注册验证码
+- **URL**: `/api/auth/send-code`
+- **方法**: POST
+- **不需要登录**
+- **请求体**:
+```json
+{
+  "identifier": "user@example.com"
+}
+```
+- **参数说明**:
+  - `identifier`: 手机号或邮箱
+- **限流**: 同一账号 60 秒内只能发送一次
+- **响应**:
+```json
+{
+  "code": 0,
+  "message": "验证码发送成功",
+  "data": {
+    "identifier": "user@example.com",
+    "expires_in": 300
+  }
+}
+```
+- **开发环境**: 验证码会打印在服务器控制台
+
+### 3. 用户注册
+- **URL**: `/api/auth/register`
+- **方法**: POST
+- **不需要登录**
+- **请求体**:
+```json
+{
+  "username": "newuser",
+  "password": "password123",
+  "identifier": "user@example.com",
+  "code": "123456",
+  "role": "user"
+}
+```
+- **参数说明**:
+  - `username`: 用户名
+  - `password`: 密码
+  - `identifier`: 手机号或邮箱（与发送验证码时一致）
+  - `code`: 收到的 6 位验证码
+  - `role`: 角色（可选，默认 `user`），可选值：`admin`/`regulator`/`dispatcher`/`planner`/`user`
+
+### 4. 用户登录
 - **URL**: `/api/auth/login`
 - **方法**: POST
+- **不需要登录**
 - **请求体**:
 ```json
 {
   "username": "admin",
-  "password": "admin123"
+  "password": "admin123",
+  "captcha_key": "captcha:1782720338863",
+  "captcha_code": "ab2d"
 }
 ```
+- **参数说明**:
+  - `captcha_key`: 图形验证码的 key（从 `/api/auth/captcha` 获取）
+  - `captcha_code`: 用户输入的图形验证码文字（不区分大小写）
 - **响应**:
 ```json
 {
@@ -28,74 +105,78 @@
     "id": 1,
     "username": "admin",
     "email": "admin@example.com",
+    "phone": null,
     "role": "admin",
     "created_at": "2026-06-28T13:16:33.407Z",
-    "token": "token_1_1782652698766"
+    "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
   }
 }
 ```
+- **说明**: 
+  - `token` 是 JWT 令牌，有效期 24 小时
+  - 后续请求需在请求头携带：`Authorization: Bearer <token>`
 
-### 2. 用户注册
-- **URL**: `/api/auth/register`
-- **方法**: POST
-- **请求体**:
-```json
-{
-  "username": "newuser",
-  "password": "password123",
-  "email": "user@example.com",
-  "role": "user"
-}
-```
-
-### 3. 获取用户信息
+### 5. 获取用户信息
 - **URL**: `/api/auth/info/:userId`
 - **方法**: GET
+- **需要登录**
 - **示例**: `/api/auth/info/1`
 
 ---
 
-## 用户数据接口 (/api/userdata)
+## 二、用户查询记录接口 (/api/userdata)
+
+> 所有接口需要登录，用户只能操作自己的记录
 
 ### 1. 保存查询记录
 - **URL**: `/api/userdata/save`
 - **方法**: POST
+- **需要登录**
 - **请求体**:
 ```json
 {
-  "user_id": 1,
   "query_type": "point-query",
   "query_params": { "lng": -118.208, "lat": 34.08 },
   "result_count": 1,
   "result_data": { ... }
 }
 ```
-- **query_type 类型**:
-  - `point-query`: 点选建筑查询
-  - `takeoff-filter`: 起降点分析
-  - `route-check`: 航线碰撞检测
-  - `nofly-zones`: 禁飞区查询
+- **参数说明**:
+  - `query_type`: 查询类型，可选值：
+    - `point-query`: 点选建筑查询
+    - `takeoff-filter`: 起降点分析
+    - `route-check`: 航线碰撞检测
+    - `nofly-zones`: 禁飞区查询
+  - `query_params`: 查询参数（JSON 对象）
+  - `result_count`: 结果数量
+  - `result_data`: 查询结果数据（JSON 对象，可选）
+- **注意**: `user_id` 从登录 token 中自动获取，不需要传
 
-### 2. 获取用户查询记录列表
-- **URL**: `/api/userdata/list/:userId`
+### 2. 获取查询记录列表
+- **URL**: `/api/userdata/list`
 - **方法**: GET
+- **需要登录**
 - **参数**:
-  - `query_type`: 查询类型（可选）
-  - `page`: 页码（默认1）
-  - `pageSize`: 每页数量（默认20）
-- **示例**: `/api/userdata/list/1?page=1&pageSize=10`
+  - `query_type`: 查询类型（可选，筛选）
+  - `page`: 页码（默认 1）
+  - `pageSize`: 每页数量（默认 20）
+- **示例**: `/api/userdata/list?page=1&pageSize=10&query_type=point-query`
 
 ### 3. 获取单条记录详情
 - **URL**: `/api/userdata/detail/:recordId`
 - **方法**: GET
+- **需要登录**
 
 ### 4. 删除查询记录
 - **URL**: `/api/userdata/delete/:recordId`
 - **方法**: DELETE
+- **需要登录**
 
 ---
 
-## 建筑查询接口 (/api/buildings)
+## 三、建筑查询接口 (/api/buildings)
+
+> 需要登录
 
 ### 1. 点选建筑属性查询
 - **URL**: `/api/buildings/point-query`
@@ -143,21 +224,26 @@
 
 ---
 
-## 起降点分析接口 (/api/build)
+## 四、起降点分析接口 (/api/build)
+
+> 需要登录
 
 ### 获取候选起降点
 - **URL**: `/api/build/takeoff-filter`
 - **方法**: GET
 - **参数**:
-  - `minHeight`: 最小建筑高度
-  - `maxHeight`: 最大建筑高度
-  - `minArea`: 最小屋顶面积
-  - `maxArea`: 最大屋顶面积
+  - `minHeight`: 最小建筑高度（默认 0）
+  - `maxHeight`: 最大建筑高度（默认 100）
+  - `minArea`: 最小屋顶面积（默认 50）
+  - `maxArea`: 最大屋顶面积（默认 500）
 - **示例**: `/api/build/takeoff-filter?minHeight=0&maxHeight=50&minArea=50&maxArea=500`
+- **返回**: GeoJSON FeatureCollection，最多 1000 条
 
 ---
 
-## 航线碰撞预警接口 (/api/uav)
+## 五、航线碰撞预警接口 (/api/uav)
+
+> 需要登录
 
 ### 航线检测
 - **URL**: `/api/uav/route-check`
@@ -172,10 +258,15 @@
   "flightHeight": 30
 }
 ```
+- **参数说明**:
+  - `route`: GeoJSON LineString 航线坐标
+  - `flightHeight`: 飞行高度（米）
 
 ---
 
-## 禁飞区接口 (/api/nofly)
+## 六、禁飞区接口 (/api/nofly)
+
+> 需要登录
 
 ### 1. 获取所有禁飞区
 - **URL**: `/api/nofly/zones`
@@ -183,6 +274,7 @@
 - **参数**:
   - `zoneType`: 区域类型（可选）
   - `restrict`: 限制类型（可选）
+- **返回**: GeoJSON FeatureCollection
 
 ### 2. 获取单个禁飞区详情
 - **URL**: `/api/nofly/:zoneId`
@@ -190,72 +282,94 @@
 
 ---
 
-## 前端对接示例 (Vue3)
+## 七、管理员接口 (/api/admin)
 
-### 1. 配置 Vite 代理 (vite.config.js)
-```javascript
-export default defineConfig({
-  server: {
-    proxy: {
-      '/api': {
-        target: 'http://localhost:3000',
-        changeOrigin: true
-      }
-    }
-  }
-})
+> 所有接口需要管理员权限（role = admin）
+
+### 1. 获取用户列表
+- **URL**: `/api/admin/users`
+- **方法**: GET
+- **参数**:
+  - `page`: 页码（默认 1）
+  - `pageSize`: 每页数量（默认 20）
+  - `role`: 角色筛选（可选）
+
+### 2. 获取用户详情
+- **URL**: `/api/admin/user/:userId`
+- **方法**: GET
+
+### 3. 更新用户角色
+- **URL**: `/api/admin/user/:userId/role`
+- **方法**: PUT
+- **请求体**:
+```json
+{
+  "role": "planner"
+}
 ```
+- **角色可选值**: `admin` / `regulator` / `dispatcher` / `planner` / `user`
 
-### 2. 登录并保存查询记录示例
-```javascript
-// 登录
-async function login(username, password) {
-  const res = await fetch('/api/auth/login', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password })
-  });
-  const data = await res.json();
-  if (data.code === 0) {
-    localStorage.setItem('user', JSON.stringify(data.data));
-    return data.data;
+### 4. 删除用户
+- **URL**: `/api/admin/user/:userId`
+- **方法**: DELETE
+- **说明**: 同时删除该用户的所有查询记录，不能删除自己
+
+### 5. 查看指定用户的查询记录
+- **URL**: `/api/admin/userdata/:userId`
+- **方法**: GET
+- **参数**:
+  - `query_type`: 查询类型（可选）
+  - `page`: 页码（默认 1）
+  - `pageSize`: 每页数量（默认 20）
+
+### 6. 查看记录详情
+- **URL**: `/api/admin/userdata/detail/:recordId`
+- **方法**: GET
+
+### 7. 删除查询记录
+- **URL**: `/api/admin/userdata/:recordId`
+- **方法**: DELETE
+
+### 8. 系统统计数据
+- **URL**: `/api/admin/stats`
+- **方法**: GET
+- **响应**:
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "total_users": 7,
+    "total_buildings": 76634,
+    "total_nofly_zones": 32,
+    "total_queries": 2,
+    "role_stats": [
+      { "role": "user", "count": 3 },
+      { "role": "admin", "count": 1 }
+    ],
+    "query_type_stats": [
+      { "query_type": "point-query", "count": 2 }
+    ]
   }
-  throw new Error(data.message);
-}
-
-// 点选查询建筑
-async function queryBuilding(lng, lat) {
-  const res = await fetch(`/api/buildings/point-query?lng=${lng}&lat=${lat}`);
-  return await res.json();
-}
-
-// 保存查询记录
-async function saveQueryRecord(user_id, query_type, params, result) {
-  const res = await fetch('/api/userdata/save', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      user_id,
-      query_type,
-      query_params: params,
-      result_count: 1,
-      result_data: result
-    })
-  });
-  return await res.json();
-}
-
-// 使用示例
-const user = await login('admin', 'admin123');
-const building = await queryBuilding(-118.2085569, 34.0805717);
-if (building.code === 0) {
-  await saveQueryRecord(user.id, 'point-query', { lng: -118.2085569, lat: 34.0805717 }, building.data);
 }
 ```
 
 ---
 
-## 测试用户账号
+## 八、角色权限说明
+
+| 角色 | 等级 | 权限 |
+|------|------|------|
+| admin | 99 | 所有权限，包括用户管理 |
+| regulator | 50 | 监管人员 |
+| dispatcher | 40 | 调度人员 |
+| planner | 30 | 规划师 |
+| user | 10 | 普通用户，只能查询和管理自己的记录 |
+
+---
+
+## 九、测试用户账号
+
 | 用户名 | 密码 | 角色 |
 |--------|------|------|
 | admin | admin123 | admin |
@@ -265,7 +379,21 @@ if (building.code === 0) {
 
 ---
 
-## 数据库表结构
+## 十、错误码说明
+
+| 状态码 | code | 说明 |
+|--------|------|------|
+| 200 | 0 | 成功 |
+| 400 | 400 | 参数错误 |
+| 401 | 401 | 未登录或 token 过期 |
+| 403 | 403 | 无权限（角色不足） |
+| 404 | 404 | 资源不存在 |
+| 429 | 429 | 请求过于频繁（限流） |
+| 500 | 500 | 服务器内部错误 |
+
+---
+
+## 十一、数据库表结构
 
 ### users 用户表
 | 字段 | 类型 | 说明 |
@@ -274,7 +402,10 @@ if (building.code === 0) {
 | username | VARCHAR(50) | 用户名 |
 | password | VARCHAR(255) | 密码 |
 | email | VARCHAR(100) | 邮箱 |
+| phone | VARCHAR(20) | 手机号 |
 | role | VARCHAR(20) | 角色 |
+| email_verified | BOOLEAN | 邮箱是否验证 |
+| phone_verified | BOOLEAN | 手机号是否验证 |
 | created_at | TIMESTAMP | 创建时间 |
 | last_login | TIMESTAMP | 最后登录 |
 
