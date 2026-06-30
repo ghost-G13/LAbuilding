@@ -1,5 +1,6 @@
 <script setup>
 import { ref, watch, onMounted, computed } from 'vue'
+import { login, register, sendCode, getTakeoffFilter } from './utils/request'
 
 const isNavCompact = ref(false)
 
@@ -100,23 +101,29 @@ const handleLogin = async () => {
   isLoginLoading.value = true
   loginError.value = ''
   
-  await new Promise(resolve => setTimeout(resolve, 1500))
-  
-  if (loginForm.value.account === 'admin' && loginForm.value.password === '123456') {
-    isLoggedIn.value = true
-    loggedInUser.value = loginForm.value.account
+  try {
+    const data = await login({
+      username: loginForm.value.account,
+      password: loginForm.value.password
+    })
     
-    const loginData = {
-      user: loginForm.value.account,
-      loginTime: Date.now(),
-      expires: Date.now() + 72 * 60 * 60 * 1000
+    if (data.code === 0) {
+      isLoggedIn.value = true
+      loggedInUser.value = data.data.username
+      
+      localStorage.setItem('user', JSON.stringify({
+        token: data.data.token,
+        user: data.data.username,
+        id: data.data.id
+      }))
+      
+      closeLogin()
+      alert('登录成功！')
+    } else {
+      loginError.value = data.message
     }
-    localStorage.setItem('loginData', JSON.stringify(loginData))
-    
-    closeLogin()
-    alert('登录成功！')
-  } else {
-    loginError.value = '账号或密码错误，请使用 admin / 123456 测试'
+  } catch (error) {
+    loginError.value = '登录失败，请稍后重试'
   }
   
   isLoginLoading.value = false
@@ -127,17 +134,35 @@ const handleRegister = async () => {
   isRegisterLoading.value = true
   registerError.value = ''
   
-  await new Promise(resolve => setTimeout(resolve, 1500))
+  try {
+    const data = await register({
+      identifier: registerForm.value.phone,
+      code: registerForm.value.code,
+      password: registerForm.value.password,
+      username: registerForm.value.username
+    })
+    
+    if (data.code === 0) {
+      isRegisterMode.value = false
+      alert('注册成功！请登录')
+    } else {
+      registerError.value = data.message
+    }
+  } catch (error) {
+    registerError.value = '注册失败，请稍后重试'
+  }
   
-  isRegisterMode.value = false
-  registerError.value = ''
-  alert('注册成功！请登录')
+  isRegisterLoading.value = false
 }
 
 const closeLogin = () => {
   showLoginModal.value = false
   loginError.value = ''
   registerError.value = ''
+}
+
+const openLogin = () => {
+  showLoginModal.value = true
 }
 
 const toggleRegister = () => {
@@ -152,18 +177,29 @@ const togglePassword = (type) => {
   if (type === 'confirm') showRegisterConfirmPassword.value = !showRegisterConfirmPassword.value
 }
 
-const getCode = () => {
+const getCode = async () => {
   if (!/^1\d{10}$/.test(registerForm.value.phone)) {
     registerError.value = '请输入正确的手机号'
     return
   }
-  codeCountdown.value = 60
-  const timer = setInterval(() => {
-    codeCountdown.value--
-    if (codeCountdown.value <= 0) {
-      clearInterval(timer)
+  
+  try {
+    const data = await sendCode({ phone: registerForm.value.phone })
+    
+    if (data.code === 0) {
+      codeCountdown.value = 60
+      const timer = setInterval(() => {
+        codeCountdown.value--
+        if (codeCountdown.value <= 0) {
+          clearInterval(timer)
+        }
+      }, 1000)
+    } else {
+      registerError.value = data.message
     }
-  }, 1000)
+  } catch (error) {
+    registerError.value = '发送验证码失败'
+  }
 }
 
 const checkLogin = () => {
@@ -175,7 +211,7 @@ const checkLogin = () => {
   }
 }
 
-const filterTakeoffPoints = () => {
+const filterTakeoffPoints = async () => {
   if (!isInputComplete.value) return
   
   const minH = parseFloat(flightHeightMin.value)
@@ -183,15 +219,36 @@ const filterTakeoffPoints = () => {
   const minA = parseFloat(areaMin.value)
   const maxA = parseFloat(areaMax.value)
   
-  if (window.filterBuildings) {
-    hasFiltered.value = true
-    filteredCount.value = -1
+  hasFiltered.value = true
+  filteredCount.value = -1
+  
+  try {
+    const data = await getTakeoffFilter({
+      minHeight: minH,
+      maxHeight: maxH,
+      minArea: minA,
+      maxArea: maxA
+    })
     
-    window.filterCallback = (result) => {
-      filteredCount.value = result.count
-      filteredData.value = result.data
+    if (data.code === 0) {
+      filteredCount.value = data.count
+      filteredData.value = data.data?.features?.map(f => ({
+        id: f.properties?.bid || f.properties?.id,
+        height: f.properties?.height,
+        area: f.properties?.roof_area || f.properties?.area_m2
+      })) || []
+      
+      if (window.filterBuildings) {
+        window.filterBuildings(minH, maxH, minA, maxA)
+      }
+    } else {
+      filteredCount.value = 0
+      filteredData.value = []
     }
-    window.filterBuildings(minH, maxH, minA, maxA)
+  } catch (error) {
+    console.error('起降点分析失败:', error)
+    filteredCount.value = 0
+    filteredData.value = []
   }
 }
 
@@ -353,7 +410,7 @@ onMounted(() => {
             </svg>
             <span>设置</span>
           </button>
-          <button class="nav-btn" @click="showLoginModal = true">
+          <button class="nav-btn" @click="openLogin()">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
               <circle cx="12" cy="7" r="4"></circle>
@@ -526,7 +583,7 @@ onMounted(() => {
             </button>
             
             <p class="toggle-link">
-              没有账号？<a href="#" @click.prevent="toggleRegister"><font color="#0066ff">去注册</font></a>
+              没有账号？<a href="#" @click.prevent="toggleRegister"><span style="color: #0066ff">去注册</span></a>
             </p>
           </form>
           
@@ -631,7 +688,7 @@ onMounted(() => {
             </button>
             
             <p class="toggle-link">
-              已有账号？<a href="#" @click.prevent="toggleRegister"><font color="#0066ff">返回登录</font></a>
+              已有账号？<a href="#" @click.prevent="toggleRegister"><span style="color: #0066ff">返回登录</span></a>
             </p>
           </form>
         </div>
@@ -1410,6 +1467,34 @@ html, body, #app {
 .eye-btn svg {
   width: 18px;
   height: 18px;
+}
+
+.captcha-wrapper {
+  gap: 10px;
+}
+
+.captcha-input {
+  flex: 1;
+  padding: 12px;
+}
+
+.captcha-img {
+  width: 120px;
+  height: 40px;
+  border-radius: 10px;
+  cursor: pointer;
+  object-fit: cover;
+}
+
+.captcha-btn {
+  padding: 0 20px;
+  height: 40px;
+  border: none;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  font-size: 14px;
+  cursor: pointer;
 }
 
 .eye-btn:hover {
