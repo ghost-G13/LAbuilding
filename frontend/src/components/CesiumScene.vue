@@ -3,13 +3,14 @@ import { onMounted, onBeforeUnmount, ref, defineExpose } from 'vue'
 import * as Cesium from 'cesium'
 import 'cesium/Build/Cesium/Widgets/widgets.css'
 
-const BUILDING_GEOJSON_URL = '/data/la_height_filled.geojson'
-const NO_FLY_ZONE_URL = '/data/no_fly_zone.geojson'
+const BUILDING_API_URL = '/api/public/buildings'
+const NO_FLY_ZONE_API_URL = '/api/public/nofly-zones'
 
 const cesiumContainer = ref(null)
-const buildingLoadingText = ref(`建筑白模：正在加载 ${BUILDING_GEOJSON_URL}`)
+const buildingLoadingText = ref('建筑白模：正在从服务器获取数据...')
 const buildingCount = ref(0)
 const showLegend = ref(true)
+const buildingTotal = ref(0)
 
 let viewer = null
 let buildingDataSource = null
@@ -64,28 +65,62 @@ function getHeightColor(height) {
 
 async function loadBuildingWhiteModel() {
   try {
-    buildingDataSource = await Cesium.GeoJsonDataSource.load(BUILDING_GEOJSON_URL)
-    viewer.dataSources.add(buildingDataSource)
+    buildingLoadingText.value = '建筑白模：正在从服务器获取数据...'
+    
+    const pageSize = 2000
+    let currentPage = 1
+    let totalLoaded = 0
+    let allFeatures = []
+    
+    let response = await fetch(`${BUILDING_API_URL}?page=${currentPage}&pageSize=${pageSize}`)
+    let result = await response.json()
 
-    let count = 0
-    for (const entity of buildingDataSource.entities.values) {
-      if (!entity.polygon) continue
-
-      const height = getEntityHeight(entity)
-      const color = colorMode === 'height' ? getHeightColor(height) : Cesium.Color.fromCssColorString('rgba(200, 200, 200, 0.75)')
-
-      entity.polygon.height = 0
-      entity.polygon.extrudedHeight = height
-      entity.polygon.closeTop = true
-      entity.polygon.closeBottom = true
-      entity.polygon.outline = false
-      entity.polygon.material = color
-
-      count++
+    if (result.code !== 0) {
+      throw new Error(result.message || '获取建筑数据失败')
     }
 
-    buildingCount.value = count
-    buildingLoadingText.value = `建筑白模：已加载 ${count} 栋建筑`
+    buildingTotal.value = result.total
+    
+    buildingDataSource = new Cesium.CustomDataSource('buildings')
+    await viewer.dataSources.add(buildingDataSource)
+    
+    while (currentPage <= Math.ceil(result.total / pageSize)) {
+      const tempDataSource = await Cesium.GeoJsonDataSource.load(result.data)
+      
+      for (const entity of tempDataSource.entities.values) {
+        if (!entity.polygon) continue
+
+        const height = getEntityHeight(entity)
+        const color = colorMode === 'height' ? getHeightColor(height) : Cesium.Color.fromCssColorString('rgba(200, 200, 200, 0.75)')
+
+        entity.polygon.height = 0
+        entity.polygon.extrudedHeight = height
+        entity.polygon.closeTop = true
+        entity.polygon.closeBottom = true
+        entity.polygon.outline = false
+        entity.polygon.material = color
+
+        buildingDataSource.entities.add(entity)
+        totalLoaded++
+      }
+      
+      buildingCount.value = totalLoaded
+      buildingLoadingText.value = `建筑白模：已加载 ${totalLoaded}/${result.total} 栋建筑`
+      
+      await new Promise(resolve => setTimeout(resolve, 50))
+      
+      currentPage++
+      if (currentPage <= Math.ceil(result.total / pageSize)) {
+        response = await fetch(`${BUILDING_API_URL}?page=${currentPage}&pageSize=${pageSize}`)
+        result = await response.json()
+        
+        if (result.code !== 0) {
+          break
+        }
+      }
+    }
+    
+    buildingLoadingText.value = `建筑白模：已加载 ${totalLoaded} 栋建筑（来自服务器）`
 
     try {
       await viewer.flyTo(buildingDataSource, {
@@ -100,14 +135,22 @@ async function loadBuildingWhiteModel() {
     detectPropertyFields()
   } catch (error) {
     console.error('加载建筑白模失败：', error)
-    buildingLoadingText.value = `建筑白模：加载失败，请检查 ${BUILDING_GEOJSON_URL}`
+    buildingLoadingText.value = `建筑白模：加载失败，请检查服务器连接`
   }
 }
 
 async function loadNoFlyZone() {
   if (noFlyZoneDataSource) return
   try {
-    noFlyZoneDataSource = await Cesium.GeoJsonDataSource.load(NO_FLY_ZONE_URL)
+    const response = await fetch(NO_FLY_ZONE_API_URL)
+    const result = await response.json()
+
+    if (result.code !== 0) {
+      throw new Error(result.message || '获取禁飞区数据失败')
+    }
+
+    const geojsonData = result.data
+    noFlyZoneDataSource = await Cesium.GeoJsonDataSource.load(geojsonData)
     noFlyZoneDataSource.show = false
     for (const entity of noFlyZoneDataSource.entities.values) {
       if (entity.polygon) {
@@ -119,7 +162,7 @@ async function loadNoFlyZone() {
       }
     }
     viewer.dataSources.add(noFlyZoneDataSource)
-    console.log('禁飞区数据加载成功')
+    console.log('禁飞区数据加载成功（来自服务器）')
   } catch (error) {
     console.error('加载禁飞区数据失败：', error)
   }
@@ -325,6 +368,7 @@ function clearDrawing() {
   }
   pointEntities.forEach(pe => viewer.entities.remove(pe))
   pointEntities = []
+  clearCollisionHighlight()
   drawingHistory = []
   drawnPolygonPositions = []
   document.removeEventListener('keydown', handleKeyDown)
@@ -927,6 +971,10 @@ function initCesiumViewer() {
   Object.defineProperty(window, 'collisionCallback', {
     get: () => collisionCallback,
     set: (val) => { collisionCallback = val }
+  })
+  Object.defineProperty(window, 'filterCallback', {
+    get: () => filterCallback,
+    set: (val) => { filterCallback = val }
   })
 }
 

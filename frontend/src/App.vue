@@ -44,6 +44,7 @@ const showLoginModal = ref(false)
 const isRegisterMode = ref(false)
 const isLoggedIn = ref(false)
 const loggedInUser = ref(null)
+const showUserMenu = ref(false)
 
 const loginForm = ref({
   account: '',
@@ -57,7 +58,7 @@ const captchaKey = ref('')
 
 const registerForm = ref({
   username: '',
-  phone: '',
+  email: '',
   code: '',
   password: '',
   confirmPassword: '',
@@ -92,8 +93,10 @@ const canLogin = computed(() => {
 
 const canRegister = computed(() => {
   const f = registerForm.value
+  const isEmailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.email)
   return f.username.trim() && 
-         /^1\d{10}$/.test(f.phone) && 
+         f.email.trim() && 
+         isEmailValid && 
          f.code.length === 6 && 
          f.password.length >= 6 && 
          f.password === f.confirmPassword && 
@@ -118,12 +121,21 @@ const handleLogin = async () => {
   loginError.value = ''
   
   try {
+    console.log('登录参数:', {
+      username: loginForm.value.account,
+      password: loginForm.value.password,
+      captcha_key: captchaKey.value,
+      captcha_code: loginForm.value.captcha
+    })
+    
     const data = await login({
       username: loginForm.value.account,
       password: loginForm.value.password,
       captcha_key: captchaKey.value,
       captcha_code: loginForm.value.captcha
     })
+    
+    console.log('登录响应:', data)
     
     if (data.code === 0) {
       isLoggedIn.value = true
@@ -139,11 +151,13 @@ const handleLogin = async () => {
       closeLogin()
       alert('登录成功！')
     } else {
-      loginError.value = data.message
+      loginError.value = data.message || '登录失败'
       refreshCaptcha()
     }
   } catch (error) {
-    loginError.value = '登录失败，请稍后重试'
+    console.error('登录异常:', error)
+    loginError.value = error.message || '登录失败，请稍后重试'
+    refreshCaptcha()
   }
   
   isLoginLoading.value = false
@@ -156,7 +170,7 @@ const handleRegister = async () => {
   
   try {
     const data = await register({
-      identifier: registerForm.value.phone,
+      email: registerForm.value.email.trim(),
       code: registerForm.value.code,
       password: registerForm.value.password,
       username: registerForm.value.username
@@ -186,6 +200,14 @@ const openLogin = () => {
   refreshCaptcha()
 }
 
+const handleLogout = () => {
+  isLoggedIn.value = false
+  loggedInUser.value = null
+  showUserMenu.value = false
+  localStorage.removeItem('user')
+  alert('已退出登录')
+}
+
 const toggleRegister = () => {
   isRegisterMode.value = !isRegisterMode.value
   loginError.value = ''
@@ -199,13 +221,20 @@ const togglePassword = (type) => {
 }
 
 const getCode = async () => {
-  if (!/^1\d{10}$/.test(registerForm.value.phone)) {
-    registerError.value = '请输入正确的手机号'
+  const email = registerForm.value.email.trim()
+  
+  if (!email) {
+    registerError.value = '请输入邮箱'
+    return
+  }
+  
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    registerError.value = '请输入正确的邮箱格式'
     return
   }
   
   try {
-    const data = await sendCode({ phone: registerForm.value.phone })
+    const data = await sendCode({ email })
     
     if (data.code === 0) {
       codeCountdown.value = 60
@@ -407,13 +436,18 @@ onMounted(() => {
             </svg>
             <span>设置</span>
           </button>
-          <button class="nav-btn" @click="openLogin()">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
-              <circle cx="12" cy="7" r="4"></circle>
-            </svg>
-            <span>登录</span>
-          </button>
+          <div class="user-menu-container">
+            <button class="nav-btn" @click="showUserMenu = !showUserMenu">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                <circle cx="12" cy="7" r="4"></circle>
+              </svg>
+              <span>{{ isLoggedIn ? loggedInUser : '登录' }}</span>
+            </button>
+            <div v-if="isLoggedIn && showUserMenu" class="user-dropdown">
+              <button class="dropdown-item" @click="handleLogout">退出登录</button>
+            </div>
+          </div>
         </div>
       </div>
     </header>
@@ -608,11 +642,12 @@ onMounted(() => {
             <div class="form-group">
               <div class="input-wrapper">
                 <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path>
+                  <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+                  <polyline points="22,6 12,13 2,6"></polyline>
                 </svg>
-                <input type="tel" v-model="registerForm.phone" placeholder="请输入手机号" class="modal-input" @keyup.enter="handleRegister">
+                <input type="email" v-model="registerForm.email" placeholder="请输入邮箱" class="modal-input" @keyup.enter="handleRegister">
               </div>
-              <span v-if="registerForm.phone && !/^1\d{10}$/.test(registerForm.phone)" class="input-error">请输入正确的11位手机号</span>
+              <span v-if="registerForm.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(registerForm.email)" class="input-error">请输入正确的邮箱格式</span>
             </div>
             
             <div class="form-group">
@@ -626,7 +661,7 @@ onMounted(() => {
                   </svg>
                   <input type="text" v-model="registerForm.code" placeholder="请输入验证码" class="modal-input" maxlength="6" @keyup.enter="handleRegister">
                 </div>
-                <button type="button" class="code-btn" :disabled="codeCountdown > 0 || !/^1\d{10}$/.test(registerForm.phone)" @click="getCode">
+                <button type="button" class="code-btn" :disabled="codeCountdown > 0 || !registerForm.email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(registerForm.email)" @click="getCode">
                   {{ codeCountdown > 0 ? `重新发送 (${codeCountdown}s)` : '获取验证码' }}
                 </button>
               </div>
@@ -920,6 +955,41 @@ html, body, #app {
   transform: scale(1.1);
 }
 
+.user-menu-container {
+  position: relative;
+}
+
+.user-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 8px;
+  min-width: 120px;
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  overflow: hidden;
+  z-index: 1000;
+}
+
+.dropdown-item {
+  width: 100%;
+  padding: 10px 16px;
+  border: none;
+  background: none;
+  color: #333;
+  font-size: 14px;
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 0.2s;
+}
+
+.dropdown-item:hover {
+  background-color: rgba(0, 0, 0, 0.05);
+}
+
 .map-container {
   width: 100%;
   height: 100%;
@@ -1038,8 +1108,7 @@ html, body, #app {
 
 .result-area {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  flex-direction: column;
   margin-top: 16px;
   padding-top: 14px;
   border-top: 1px solid rgba(0, 0, 0, 0.08);
