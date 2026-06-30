@@ -6,30 +6,34 @@ function getToken() {
 }
 
 async function request(url, options = {}) {
-  const headers = { 'Content-Type': 'application/json', ...options.headers }
+  const headers = {
+    'Content-Type': 'application/json',
+    ...options.headers
+  }
+
   const token = getToken()
-  if (token) headers['Authorization'] = `Bearer ${token}`
-  
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`
+  }
+
   const response = await fetch(BASE_URL + url, {
     ...options,
     headers,
     body: options.body ? JSON.stringify(options.body) : undefined
   })
-  
+
   const data = await response.json()
+
+  if (data.code === 401) {
+    localStorage.removeItem('user')
+    throw new Error('请先登录')
+  }
+
   return data
 }
 
 export async function getCaptcha() {
-  const data = await request('/auth/captcha')
-  if (data.code === 0 && data.data?.image) {
-    const svgBlob = new Blob([data.data.image], { type: 'image/svg+xml' })
-    return {
-      src: URL.createObjectURL(svgBlob),
-      key: data.data.captcha_key
-    }
-  }
-  throw new Error('获取验证码失败')
+  return request('/auth/captcha')
 }
 
 export async function login(body) {
@@ -61,6 +65,19 @@ export async function getTakeoffFilter(params = {}) {
 
 export async function queryBuildingByPoint(lng, lat) {
   return request(`/buildings/point-query?lng=${lng}&lat=${lat}`)
+}
+
+export async function saveQueryRecord(body) {
+  return request('/userdata/save', { method: 'POST', body })
+}
+
+export async function getMyRecords(params = {}) {
+  const queryString = new URLSearchParams(params).toString()
+  return request('/userdata/list?' + queryString)
+}
+
+export async function checkRouteCollision(body) {
+  return request('/uav/route-check', { method: 'POST', body })
 }
 
 export default request

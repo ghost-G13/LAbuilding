@@ -1,6 +1,6 @@
 <script setup>
 import { ref, watch, onMounted, computed } from 'vue'
-import { login, register, sendCode, getTakeoffFilter } from './utils/request'
+import { login, register, sendCode, getCaptcha } from './utils/request'
 
 const isNavCompact = ref(false)
 
@@ -48,8 +48,12 @@ const loggedInUser = ref(null)
 const loginForm = ref({
   account: '',
   password: '',
+  captcha: '',
   rememberAccount: false
 })
+
+const captchaImage = ref('')
+const captchaKey = ref('')
 
 const registerForm = ref({
   username: '',
@@ -83,7 +87,7 @@ const passwordStrength = computed(() => {
 })
 
 const canLogin = computed(() => {
-  return loginForm.value.account.trim() && loginForm.value.password.trim()
+  return loginForm.value.account.trim() && loginForm.value.password.trim() && loginForm.value.captcha.trim()
 })
 
 const canRegister = computed(() => {
@@ -96,6 +100,18 @@ const canRegister = computed(() => {
          f.agreeTerms
 })
 
+const refreshCaptcha = async () => {
+  try {
+    const data = await getCaptcha()
+    if (data.code === 0) {
+      captchaImage.value = data.data.image
+      captchaKey.value = data.data.captcha_key
+    }
+  } catch (error) {
+    console.error('获取验证码失败:', error)
+  }
+}
+
 const handleLogin = async () => {
   if (!canLogin.value) return
   isLoginLoading.value = true
@@ -104,7 +120,9 @@ const handleLogin = async () => {
   try {
     const data = await login({
       username: loginForm.value.account,
-      password: loginForm.value.password
+      password: loginForm.value.password,
+      captcha_key: captchaKey.value,
+      captcha_code: loginForm.value.captcha
     })
     
     if (data.code === 0) {
@@ -114,13 +132,15 @@ const handleLogin = async () => {
       localStorage.setItem('user', JSON.stringify({
         token: data.data.token,
         user: data.data.username,
-        id: data.data.id
+        id: data.data.id,
+        role: data.data.role
       }))
       
       closeLogin()
       alert('登录成功！')
     } else {
       loginError.value = data.message
+      refreshCaptcha()
     }
   } catch (error) {
     loginError.value = '登录失败，请稍后重试'
@@ -163,6 +183,7 @@ const closeLogin = () => {
 
 const openLogin = () => {
   showLoginModal.value = true
+  refreshCaptcha()
 }
 
 const toggleRegister = () => {
@@ -211,7 +232,7 @@ const checkLogin = () => {
   }
 }
 
-const filterTakeoffPoints = async () => {
+const filterTakeoffPoints = () => {
   if (!isInputComplete.value) return
   
   const minH = parseFloat(flightHeightMin.value)
@@ -219,36 +240,15 @@ const filterTakeoffPoints = async () => {
   const minA = parseFloat(areaMin.value)
   const maxA = parseFloat(areaMax.value)
   
-  hasFiltered.value = true
-  filteredCount.value = -1
-  
-  try {
-    const data = await getTakeoffFilter({
-      minHeight: minH,
-      maxHeight: maxH,
-      minArea: minA,
-      maxArea: maxA
-    })
+  if (window.filterBuildings) {
+    hasFiltered.value = true
+    filteredCount.value = -1
     
-    if (data.code === 0) {
-      filteredCount.value = data.count
-      filteredData.value = data.data?.features?.map(f => ({
-        id: f.properties?.bid || f.properties?.id,
-        height: f.properties?.height,
-        area: f.properties?.roof_area || f.properties?.area_m2
-      })) || []
-      
-      if (window.filterBuildings) {
-        window.filterBuildings(minH, maxH, minA, maxA)
-      }
-    } else {
-      filteredCount.value = 0
-      filteredData.value = []
+    window.filterCallback = (result) => {
+      filteredCount.value = result.count
+      filteredData.value = result.data
     }
-  } catch (error) {
-    console.error('起降点分析失败:', error)
-    filteredCount.value = 0
-    filteredData.value = []
+    window.filterBuildings(minH, maxH, minA, maxA)
   }
 }
 
@@ -354,20 +354,17 @@ onMounted(() => {
     window.setNoFlyZoneLayer(noFlyZoneLayer.value)
   }
   
-  const storedLoginData = localStorage.getItem('loginData')
-  if (storedLoginData) {
+  const storedUser = localStorage.getItem('user')
+  if (storedUser) {
     try {
-      const loginData = JSON.parse(storedLoginData)
-      if (loginData.expires > Date.now()) {
+      const userData = JSON.parse(storedUser)
+      if (userData.token) {
         isLoggedIn.value = true
-        loggedInUser.value = loginData.user
-        console.log('自动登录成功:', loginData.user)
-      } else {
-        localStorage.removeItem('loginData')
-        console.log('登录已过期')
+        loggedInUser.value = userData.user
+        console.log('自动登录成功:', userData.user)
       }
     } catch (e) {
-      localStorage.removeItem('loginData')
+      localStorage.removeItem('user')
     }
   }
 })
@@ -565,6 +562,15 @@ onMounted(() => {
                 </button>
               </div>
               <span v-if="!loginForm.password.trim()" class="input-error">请输入密码</span>
+            </div>
+            
+            <div class="form-group">
+              <div class="input-wrapper captcha-wrapper">
+                <input type="text" v-model="loginForm.captcha" placeholder="请输入验证码" class="modal-input captcha-input" @keyup.enter="handleLogin">
+                <div v-if="captchaImage" class="captcha-img" v-html="captchaImage" @click="refreshCaptcha"></div>
+                <button v-else class="captcha-btn" @click="refreshCaptcha">获取验证码</button>
+              </div>
+              <span v-if="!loginForm.captcha.trim()" class="input-error">请输入验证码</span>
             </div>
             
             <div class="form-options">
@@ -1469,6 +1475,12 @@ html, body, #app {
   height: 18px;
 }
 
+
+
+.eye-btn:hover {
+  color: #666666;
+}
+
 .captcha-wrapper {
   gap: 10px;
 }
@@ -1484,6 +1496,9 @@ html, body, #app {
   border-radius: 10px;
   cursor: pointer;
   object-fit: cover;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .captcha-btn {
@@ -1495,10 +1510,6 @@ html, body, #app {
   color: white;
   font-size: 14px;
   cursor: pointer;
-}
-
-.eye-btn:hover {
-  color: #666666;
 }
 
 .input-error {

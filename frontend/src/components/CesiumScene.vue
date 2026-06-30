@@ -2,17 +2,18 @@
 import { onMounted, onBeforeUnmount, ref, defineExpose } from 'vue'
 import * as Cesium from 'cesium'
 import 'cesium/Build/Cesium/Widgets/widgets.css'
-import { getBuildings, getNoFlyZones, queryBuildingByPoint } from '../utils/request'
+
+const BUILDING_GEOJSON_URL = '/data/la_height_filled.geojson'
+const NO_FLY_ZONE_URL = '/data/no_fly_zone.geojson'
 
 const cesiumContainer = ref(null)
-const buildingLoadingText = ref('建筑白模：正在从后端加载数据...')
+const buildingLoadingText = ref(`建筑白模：正在加载 ${BUILDING_GEOJSON_URL}`)
 const buildingCount = ref(0)
 const showLegend = ref(true)
 
 let viewer = null
 let buildingDataSource = null
 let noFlyZoneDataSource = null
-let loadedPages = new Set()
 let colorMode = 'height'
 let drawingHandler = null
 let drawnPolygon = null
@@ -63,137 +64,62 @@ function getHeightColor(height) {
 
 async function loadBuildingWhiteModel() {
   try {
-    buildingDataSource = new Cesium.CustomDataSource('buildings')
+    buildingDataSource = await Cesium.GeoJsonDataSource.load(BUILDING_GEOJSON_URL)
     viewer.dataSources.add(buildingDataSource)
 
-    const pageSize = 5000
-    let currentPage = 1
-    let totalCount = 0
-    let loadedCount = 0
+    let count = 0
+    for (const entity of buildingDataSource.entities.values) {
+      if (!entity.polygon) continue
 
-    buildingLoadingText.value = `建筑白模：正在加载第 ${currentPage} 页...`
+      const height = getEntityHeight(entity)
+      const color = colorMode === 'height' ? getHeightColor(height) : Cesium.Color.fromCssColorString('rgba(200, 200, 200, 0.75)')
 
-    async function loadPage(page) {
-      if (loadedPages.has(page)) return
+      entity.polygon.height = 0
+      entity.polygon.extrudedHeight = height
+      entity.polygon.closeTop = true
+      entity.polygon.closeBottom = true
+      entity.polygon.outline = false
+      entity.polygon.material = color
 
-      const data = await getBuildings({ page, pageSize })
-      
-      if (data.code !== 0) {
-        console.error('加载建筑数据失败:', data.message)
-        return
-      }
-
-      loadedPages.add(page)
-      const features = data.data?.features || []
-      totalCount = data.pagination?.total || 0
-
-      for (const feature of features) {
-        const geometry = feature.geometry
-        const properties = feature.properties
-
-        if (!geometry || geometry.type !== 'Polygon') continue
-
-        const coordinates = geometry.coordinates[0] || geometry.coordinates
-        if (!coordinates || !Array.isArray(coordinates)) continue
-
-        const positions = coordinates.map(coord => {
-          return Cesium.Cartesian3.fromDegrees(coord[0], coord[1], 0)
-        })
-
-        const height = properties?.height || 10
-        const color = colorMode === 'height' ? getHeightColor(height) : Cesium.Color.fromCssColorString('rgba(200, 200, 200, 0.75)')
-
-        const entity = buildingDataSource.entities.add({
-          polygon: {
-            hierarchy: new Cesium.PolygonHierarchy(positions),
-            height: 0,
-            extrudedHeight: height,
-            closeTop: true,
-            closeBottom: true,
-            outline: false,
-            material: color
-          },
-          properties: new Cesium.PropertyBag(properties)
-        })
-
-        loadedCount++
-      }
-
-      buildingCount.value = loadedCount
-      buildingLoadingText.value = `建筑白模：已加载 ${loadedCount}/${totalCount} 栋建筑`
-
-      if (loadedCount < totalCount) {
-        setTimeout(() => loadPage(currentPage + 1), 100)
-        currentPage++
-      } else {
-        buildingLoadingText.value = `建筑白模：已加载 ${loadedCount} 栋建筑`
-        
-        try {
-          await viewer.flyTo(buildingDataSource, {
-            duration: 2,
-            maximumHeight: 18000
-          })
-        } catch (e) {
-          console.warn('飞向建筑数据范围失败，保留默认视角', e)
-        }
-        
-        setupBuildingClickHandler()
-        detectPropertyFields()
-      }
+      count++
     }
 
-    await loadPage(1)
+    buildingCount.value = count
+    buildingLoadingText.value = `建筑白模：已加载 ${count} 栋建筑`
+
+    try {
+      await viewer.flyTo(buildingDataSource, {
+        duration: 2,
+        maximumHeight: 18000
+      })
+    } catch (e) {
+      console.warn('飞向建筑数据范围失败，保留默认视角', e)
+    }
+    
+    setupBuildingClickHandler()
+    detectPropertyFields()
   } catch (error) {
     console.error('加载建筑白模失败：', error)
-    buildingLoadingText.value = '建筑白模：加载失败，请检查网络连接'
+    buildingLoadingText.value = `建筑白模：加载失败，请检查 ${BUILDING_GEOJSON_URL}`
   }
 }
 
 async function loadNoFlyZone() {
   if (noFlyZoneDataSource) return
   try {
-    noFlyZoneDataSource = new Cesium.CustomDataSource('noFlyZones')
-    
-    const data = await getNoFlyZones()
-    
-    if (data.code !== 0) {
-      console.error('加载禁飞区数据失败:', data.message)
-      return
-    }
-
-    const features = data.data?.features || []
-    
-    for (const feature of features) {
-      const geometry = feature.geometry
-      const properties = feature.properties
-
-      if (!geometry || geometry.type !== 'Polygon') continue
-
-      const coordinates = geometry.coordinates[0] || geometry.coordinates
-      if (!coordinates || !Array.isArray(coordinates)) continue
-
-      const positions = coordinates.map(coord => {
-        return Cesium.Cartesian3.fromDegrees(coord[0], coord[1], 0)
-      })
-
-      const heightMeters = properties?.height_meters || 100
-
-      noFlyZoneDataSource.entities.add({
-        polygon: {
-          hierarchy: new Cesium.PolygonHierarchy(positions),
-          height: 0,
-          extrudedHeight: heightMeters,
-          material: Cesium.Color.fromCssColorString('rgba(229, 57, 53, 0.4)'),
-          outline: true,
-          outlineColor: Cesium.Color.fromCssColorString('rgba(229, 57, 53, 0.8)')
-        },
-        properties: new Cesium.PropertyBag(properties)
-      })
-    }
-
+    noFlyZoneDataSource = await Cesium.GeoJsonDataSource.load(NO_FLY_ZONE_URL)
     noFlyZoneDataSource.show = false
+    for (const entity of noFlyZoneDataSource.entities.values) {
+      if (entity.polygon) {
+        entity.polygon.height = 0
+        entity.polygon.extrudedHeight = 100
+        entity.polygon.material = Cesium.Color.fromCssColorString('rgba(229, 57, 53, 0.4)')
+        entity.polygon.outline = true
+        entity.polygon.outlineColor = Cesium.Color.fromCssColorString('rgba(229, 57, 53, 0.8)')
+      }
+    }
     viewer.dataSources.add(noFlyZoneDataSource)
-    console.log('禁飞区数据加载成功，共', features.length, '个区域')
+    console.log('禁飞区数据加载成功')
   } catch (error) {
     console.error('加载禁飞区数据失败：', error)
   }
