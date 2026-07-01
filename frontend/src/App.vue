@@ -274,10 +274,10 @@ const i18n = {
     login: '登录',
     logout: '退出登录',
     takeoffAnalysis: '01 低空选址筛选',
-    flightHeight: '输入建筑高度要求(m)',
+    flightHeight: '输入建筑高度要求(m)：',
     minHeight: '最小值',
     maxHeight: '最大值',
-    area: '输入建筑面积要求(m²)',
+    area: '输入建筑面积要求(m²)：',
     minArea: '最低面积',
     maxArea: '最大面积',
     inputComplete: '请输入以上相关信息！',
@@ -291,13 +291,15 @@ const i18n = {
     drawRange: '绘制范围',
     drawing: '绘制中…',
     drawHint: '提示：点击按钮后在地图上绘制多边形区域',
-    collisionHeight: '飞行高度区间(m)',
+    collisionHeight: '飞行高度区间(m)：',
     checkCollision: '检测碰撞',
     compliant: '安全合规',
     warning: '存在碰撞风险',
     danger: '高度危险',
     noFlyZone: '禁飞区图层',
     colorLayer: '建筑高度分级着色',
+    osm: 'OSM底图',
+    satellite: '卫星底图',
     statsTitle: '统计信息',
     buildingCount: '建筑数量',
     noFlyZoneArea: '禁飞区面积',
@@ -394,10 +396,10 @@ const i18n = {
     login: 'Login',
     logout: 'Logout',
     takeoffAnalysis: '01 Low-altitude Site Selection',
-    flightHeight: 'Building Height Requirement (m)',
+    flightHeight: 'Building Height Requirement (m):',
     minHeight: 'Min',
     maxHeight: 'Max',
-    area: 'Building Area Requirement (m²)',
+    area: 'Building Area Requirement (m²):',
     minArea: 'Min Area',
     maxArea: 'Max Area',
     inputComplete: 'Please enter all required information!',
@@ -411,13 +413,15 @@ const i18n = {
     drawRange: 'Draw Range',
     drawing: 'Drawing...',
     drawHint: 'Hint: Click and draw polygon on the map',
-    collisionHeight: 'Flight Height Range (m)',
+    collisionHeight: 'Flight Height Range (m):',
     checkCollision: 'Check Collision',
     compliant: 'Compliant',
     warning: 'Collision Risk',
     danger: 'Highly Dangerous',
     noFlyZone: 'No-Fly Zone Layer',
     colorLayer: 'Building Height Color',
+    osm: 'OSM Map',
+    satellite: 'Satellite Map',
     statsTitle: 'Statistics',
     buildingCount: 'Building Count',
     noFlyZoneArea: 'No-Fly Zone Area',
@@ -659,7 +663,11 @@ const clearDraw = () => {
 window.onDrawComplete = () => {
   isDrawn.value = true
   isDrawing.value = false
-  warningStatus.value = 'input_height'
+  if (window.isDrawingInNoFlyZone && window.isDrawingInNoFlyZone()) {
+    warningStatus.value = 'no_fly_zone'
+  } else {
+    warningStatus.value = 'input_height'
+  }
 }
 
 function checkCollision() {
@@ -765,7 +773,7 @@ onMounted(() => {
               <line x1="8" y1="2" x2="8" y2="18"></line>
               <line x1="16" y1="6" x2="16" y2="22"></line>
             </svg>
-            <span>{{ currentBasemap === 'osm' ? 'OSM' : 'Satellite' }}</span>
+            <span>{{ currentBasemap === 'osm' ? t.osm : t.satellite }}</span>
           </button>
           <div class="user-menu-container">
             <button class="nav-btn" @click="handleLoginClick">
@@ -1512,6 +1520,7 @@ html, body, #app {
   display: block;
   font-size: 13px;
   color: #F27C22;
+  font-weight: bold;
   margin-bottom: 6px;
 }
 
@@ -2557,35 +2566,35 @@ html, body, #app {
 }
 
 [data-theme="dark"] .input-box {
-  background-color: #333333;
-  border-color: #444444;
+  background-color: #6b6b6b;
+  border-color: #888888;
   color: #ffffff;
 }
 
 [data-theme="dark"] .input-box::placeholder {
-  color: #666666;
+  color: #b0b0b0;
 }
 
 [data-theme="dark"] .action-btn {
-  background-color: #333333;
-  color: #e0e0e0;
-  border-color: #444444;
+  background-color: #4a4a4a;
+  color: #ffffff;
+  border-color: #666666;
 }
 
 [data-theme="dark"] .action-btn:hover {
-  background-color: #444444;
+  background-color: #5a5a5a;
 }
 
 [data-theme="dark"] .action-btn:disabled {
-  background-color: #2a2a2a;
+  background-color: #3a3a3a;
   color: #666666;
-  border-color: #333333;
+  border-color: #444444;
 }
 
 [data-theme="dark"] .draw-btn {
-  background-color: #b8860b;
+  background-color: #f0d76e;
   color: #1a1a1a;
-  border-color: #d4a574;
+  border-color: #f5e6a3;
 }
 
 [data-theme="dark"] .result-text {
@@ -2613,10 +2622,14 @@ html, body, #app {
 }
 
 [data-theme="dark"] .stats-item {
-  color: #cccccc;
+  color: #ffffff;
 }
 
 [data-theme="dark"] .stats-value {
+  color: #ffffff;
+}
+
+[data-theme="dark"] .stats-label {
   color: #ffffff;
 }
 
@@ -2772,9 +2785,21 @@ html, body, #app {
   background-color: rgba(255, 68, 68, 0.15);
 }
 
+[data-theme="dark"] .hint-container {
+  background: rgba(0, 0, 0, 0.6);
+}
+
 [data-theme="dark"] .hint,
 [data-theme="dark"] .hint-bottom {
-  color: #cccccc;
+  color: #ffffff;
+}
+
+[data-theme="dark"] .warning-status .status-text {
+  color: #ffffff;
+}
+
+[data-theme="dark"] .result-text {
+  color: #ffffff;
 }
 
 .lang-en .zh-text {

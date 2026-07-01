@@ -24,14 +24,26 @@ const i18n = {
     hintBottom: '鼠标左键拖拽：旋转视角 ｜ 滚轮：缩放 ｜ 右键拖拽：平移',
     height: '高度',
     area: '面积',
-    m2: 'm²'
+    m2: 'm²',
+    loading: '建筑白模：正在从服务器获取数据...',
+    loaded: '建筑白模：已加载 {count} 栋建筑',
+    loadedFromServer: '建筑白模：已加载 {count} 栋建筑（来自服务器）',
+    loadingFailed: '建筑白模：加载失败，请检查服务器连接',
+    fetching: '建筑白模：已获取 {loaded}/{total} 栋建筑',
+    drawingMode: '绘制模式：点击地图添加顶点，右键结束绘制，Ctrl+Z撤销'
   },
   'en': {
     legendTitle: 'Height Levels',
     hintBottom: 'Left drag: Rotate ｜ Scroll: Zoom ｜ Right drag: Pan',
     height: 'Height',
     area: 'Area',
-    m2: 'm²'
+    m2: 'm²',
+    loading: 'Building Model: Loading data from server...',
+    loaded: 'Building Model: {count} buildings loaded',
+    loadedFromServer: 'Building Model: {count} buildings loaded (from server)',
+    loadingFailed: 'Building Model: Load failed, please check server connection',
+    fetching: 'Building Model: {loaded}/{total} buildings fetched',
+    drawingMode: 'Drawing Mode: Click map to add points, Right-click to finish, Ctrl+Z to undo'
   }
 }
 
@@ -60,13 +72,13 @@ let colorUpdateTimer = null
 let filterBlinkTimer = null
 
 const HEIGHT_LEVELS = [
-  { min: 0, max: 5, color: Cesium.Color.fromCssColorString('rgba(65, 105, 225, 0.75)'), name: 'height_0_5' },
-  { min: 5, max: 10, color: Cesium.Color.fromCssColorString('rgba(135, 206, 250, 0.75)'), name: 'height_5_10' },
-  { min: 10, max: 15, color: Cesium.Color.fromCssColorString('rgba(0, 206, 209, 0.75)'), name: 'height_10_15' },
-  { min: 15, max: 20, color: Cesium.Color.fromCssColorString('rgba(50, 205, 50, 0.75)'), name: 'height_15_20' },
-  { min: 20, max: 25, color: Cesium.Color.fromCssColorString('rgba(255, 215, 0, 0.78)'), name: 'height_20_25' },
-  { min: 25, max: 30, color: Cesium.Color.fromCssColorString('rgba(255, 165, 0, 0.8)'), name: 'height_25_30' },
-  { min: 30, max: 500, color: Cesium.Color.fromCssColorString('rgba(255, 0, 0, 0.85)'), name: 'height_30_plus' }
+  { min: 0, max: 5, color: Cesium.Color.fromCssColorString('rgba(65, 105, 225, 0.95)'), name: 'height_0_5' },
+  { min: 5, max: 10, color: Cesium.Color.fromCssColorString('rgba(135, 206, 250, 0.95)'), name: 'height_5_10' },
+  { min: 10, max: 15, color: Cesium.Color.fromCssColorString('rgba(0, 206, 209, 0.95)'), name: 'height_10_15' },
+  { min: 15, max: 20, color: Cesium.Color.fromCssColorString('rgba(50, 205, 50, 0.95)'), name: 'height_15_20' },
+  { min: 20, max: 25, color: Cesium.Color.fromCssColorString('rgba(255, 215, 0, 0.95)'), name: 'height_20_25' },
+  { min: 25, max: 30, color: Cesium.Color.fromCssColorString('rgba(255, 165, 0, 0.95)'), name: 'height_25_30' },
+  { min: 30, max: 500, color: Cesium.Color.fromCssColorString('rgba(255, 0, 0, 0.95)'), name: 'height_30_plus' }
 ]
 
 function getEntityHeight(entity) {
@@ -120,7 +132,7 @@ function getHeightColor(height) {
 
 async function loadBuildingWhiteModel(params = {}) {
   try {
-    buildingLoadingText.value = '建筑白模：正在从服务器获取数据...'
+    buildingLoadingText.value = t.value.loading
     
     const { minHeight = 0, maxHeight = 500, minArea = 0, maxArea = 100000 } = params
     const pageSize = 2000
@@ -163,7 +175,7 @@ async function loadBuildingWhiteModel(params = {}) {
       
       totalLoaded += features.length
       buildingCount.value = totalLoaded
-      buildingLoadingText.value = `建筑白模：已获取 ${totalLoaded}/${result.total} 栋建筑`
+      buildingLoadingText.value = t.value.fetching.replace('{loaded}', totalLoaded).replace('{total}', result.total)
       
       await new Promise(resolve => setTimeout(resolve, 50))
       
@@ -196,13 +208,13 @@ async function loadBuildingWhiteModel(params = {}) {
       
       const tempDataSource = await Cesium.GeoJsonDataSource.load(geoJsonData)
       
-      const color = colorMode === 'height' ? level.color : Cesium.Color.fromCssColorString('rgba(200, 200, 200, 0.75)')
+      const color = colorMode === 'height' ? level.color : Cesium.Color.fromCssColorString('rgba(200, 200, 200, 1.0)')
       
       for (const entity of tempDataSource.entities.values) {
         if (!entity.polygon) continue
         
         const realHeight = parseFloat(entity.properties?.height) || 10
-        const displayHeight = realHeight * 3
+        const displayHeight = realHeight * 12
         
         entity.polygon.height = 0
         entity.polygon.extrudedHeight = displayHeight
@@ -219,7 +231,7 @@ async function loadBuildingWhiteModel(params = {}) {
       }
     }
     
-    buildingLoadingText.value = `建筑白模：已加载 ${totalLoaded} 栋建筑（来自服务器）`
+    buildingLoadingText.value = t.value.loadedFromServer.replace('{count}', totalLoaded)
 
     try {
       if (buildingDataSources.length > 0) {
@@ -236,7 +248,7 @@ async function loadBuildingWhiteModel(params = {}) {
     detectPropertyFields()
   } catch (error) {
     console.error('加载建筑白模失败：', error)
-    buildingLoadingText.value = `建筑白模：加载失败，请检查服务器连接`
+    buildingLoadingText.value = t.value.loadingFailed
   }
 }
 
@@ -450,7 +462,7 @@ function setColorLayerByLevel(enabled) {
     if (targetColorMode === 'height' && levelIndex >= 0) {
       targetColor = HEIGHT_LEVELS[levelIndex].color
     } else {
-      targetColor = Cesium.Color.fromCssColorString('rgba(200, 200, 200, 0.75)')
+      targetColor = Cesium.Color.fromCssColorString('rgba(200, 200, 200, 1.0)')
     }
     
     for (const entity of ds.entities.values) {
@@ -544,10 +556,10 @@ function startDrawing() {
       drawnPolygon = viewer.entities.add({
         polygon: {
           hierarchy: new Cesium.PolygonHierarchy(positions),
-          material: Cesium.Color.fromCssColorString('rgba(52, 211, 153, 0.4)'),
+          material: Cesium.Color.fromCssColorString('rgba(0, 255, 255, 0.5)'),
           outline: true,
-          outlineColor: Cesium.Color.fromCssColorString('#34d399'),
-          outlineWidth: 2
+          outlineColor: Cesium.Color.fromCssColorString('#0066CC'),
+          outlineWidth: 3
         }
       })
       
@@ -568,7 +580,7 @@ function startDrawing() {
   
   document.addEventListener('keydown', handleKeyDown)
   
-  buildingLoadingText.value = '绘制模式：点击地图添加顶点，右键结束绘制，Ctrl+Z撤销'
+  buildingLoadingText.value = t.value.drawingMode
 }
 
 function handleKeyDown(e) {
@@ -636,7 +648,7 @@ function clearDrawing() {
   drawingHistory = []
   drawnPolygonPositions = []
   document.removeEventListener('keydown', handleKeyDown)
-  buildingLoadingText.value = '建筑白模：已加载 ' + buildingCount.value + ' 栋建筑'
+  buildingLoadingText.value = t.value.loaded.replace('{count}', buildingCount.value)
 }
 
 let originalColors = new Map()
@@ -927,8 +939,6 @@ function checkRouteCollision(minHeight, maxHeight) {
 }
 
 function resetBuildingColors() {
-  if (buildingDataSources.length === 0) return
-  
   if (filterBlinkTimer) {
     clearInterval(filterBlinkTimer)
     filterBlinkTimer = null
@@ -937,19 +947,14 @@ function resetBuildingColors() {
   filteredBuildings = []
   collisionBuildings = []
   
-  for (const ds of buildingDataSources) {
-    for (const entity of ds.entities.values) {
-      if (!entity.polygon) continue
-      
-      if (originalColors.has(entity)) {
-        entity.polygon.material = originalColors.get(entity)
-        originalColors.delete(entity)
-      }
-      
+  originalColors.forEach((color, entity) => {
+    if (entity.polygon) {
+      entity.polygon.material = color
       entity.polygon.outline = false
       entity.polygon.outlineWidth = 1
     }
-  }
+  })
+  originalColors.clear()
   
   clearBuildingSelection()
   console.log('清除筛选完成')
@@ -1029,6 +1034,7 @@ function setupBuildingClickHandler() {
       
       const wrappedName = wrapText(name, 12)
       const noteLabel = props.currentLanguage === 'en' ? 'Note:' : '标注:'
+      const areaLabel = props.currentLanguage === 'en' ? 'Area:' : '面积:'
       const wrappedNote = note ? `${noteLabel}\n${wrapText(note, 15)}` : ''
       
       const hierarchy = entity.polygon.hierarchy.getValue()
@@ -1040,7 +1046,7 @@ function setupBuildingClickHandler() {
       selectedNoFlyZoneLabel = viewer.entities.add({
         position: Cesium.Cartesian3.fromDegrees(longitude, latitude, 60),
         label: {
-          text: `${wrappedName}\n面积: ${area.toFixed(1)}m²${wrappedNote ? `\n${wrappedNote}` : ''}`,
+          text: `${wrappedName}\n${areaLabel} ${area.toFixed(1)}m²${wrappedNote ? `\n${wrappedNote}` : ''}`,
           font: '10pt sans-serif',
           fillColor: Cesium.Color.WHITE,
           outlineColor: Cesium.Color.BLACK,
@@ -1103,7 +1109,8 @@ function setupBuildingClickHandler() {
         horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
         pixelOffset: new Cesium.Cartesian2(0, -40),
         showBackground: true,
-        backgroundColor: Cesium.Color.fromCssColorString('rgba(0, 0, 0, 0.7)')
+        backgroundColor: Cesium.Color.fromCssColorString('rgba(0, 0, 0, 0.7)'),
+        disableDepthTestDistance: Number.POSITIVE_INFINITY
       }
     })
     
@@ -1118,10 +1125,6 @@ function clearBuildingClickHandler() {
 }
 
 function initCesiumViewer() {
-  const osmProvider = new Cesium.OpenStreetMapImageryProvider({
-    url: 'https://tile.openstreetmap.org/'
-  })
-
   viewer = new Cesium.Viewer(cesiumContainer.value, {
     animation: false,
     timeline: false,
@@ -1134,21 +1137,28 @@ function initCesiumViewer() {
     infoBox: false,
     selectionIndicator: false,
     shouldAnimate: true,
-    sceneMode: Cesium.SceneMode.SCENE3D,
-    imageryProvider: osmProvider
+    sceneMode: Cesium.SceneMode.SCENE3D
   })
 
   viewer.cesiumWidget.creditContainer.style.display = 'none'
 
+  const osmProvider = new Cesium.OpenStreetMapImageryProvider({
+    url: 'https://tile.openstreetmap.org/'
+  })
+  
+  viewer.scene.imageryLayers.removeAll()
+  const osmLayer = viewer.scene.imageryLayers.addImageryProvider(osmProvider)
+  
   const satelliteProvider = new Cesium.UrlTemplateImageryProvider({
     url: 'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-    maximumLevel: 18
+    maximumLevel: 19,
+    enablePickFeatures: false
   })
   
   const satelliteLayer = viewer.scene.imageryLayers.addImageryProvider(satelliteProvider)
   satelliteLayer.show = false
   
-  window.osmLayer = viewer.scene.imageryLayers.get(0)
+  window.osmLayer = osmLayer
   window.satelliteLayer = satelliteLayer
 
   viewer.camera.setView({
@@ -1175,6 +1185,7 @@ function initCesiumViewer() {
   window.filterBuildings = filterBuildings
   window.resetBuildingColors = resetBuildingColors
   window.checkRouteCollision = checkRouteCollision
+  window.isDrawingInNoFlyZone = isInNoFlyZone
   Object.defineProperty(window, 'collisionCallback', {
     get: () => collisionCallback,
     set: (val) => { collisionCallback = val }
@@ -1184,6 +1195,12 @@ function initCesiumViewer() {
     set: (val) => { filterCallback = val }
   })
 }
+
+watch(() => props.currentLanguage, () => {
+  if (buildingCount.value > 0) {
+    buildingLoadingText.value = t.value.loaded.replace('{count}', buildingCount.value)
+  }
+})
 
 onMounted(() => {
   initCesiumViewer()
@@ -1242,8 +1259,10 @@ defineExpose({
       </div>
     </div>
 
-    <div class="hint" :class="currentFontSize">{{ buildingLoadingText }}</div>
-    <div class="hint-bottom" :class="currentFontSize">{{ t.hintBottom }}</div>
+    <div class="hint-container" :class="currentFontSize">
+      <div class="hint">{{ buildingLoadingText }}</div>
+      <div class="hint-bottom">{{ t.hintBottom }}</div>
+    </div>
   </div>
 </template>
 
@@ -1298,26 +1317,30 @@ defineExpose({
   border: 1px solid rgba(255, 255, 255, 0.3);
 }
 
-.hint {
-  position: absolute;
-  bottom: 40px;
-  left: 20px;
-  color: #ffffff;
-  font-size: 14px;
-  text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.7);
-  z-index: 10;
-  pointer-events: none;
-}
-
-.hint-bottom {
+.hint-container {
   position: absolute;
   bottom: 20px;
   left: 20px;
-  color: #ffffff;
-  font-size: 14px;
-  text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.7);
-  z-index: 10;
+  z-index: 100;
   pointer-events: none;
+  background: rgba(255, 255, 255, 0.9);
+  padding: 10px 14px;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.hint {
+  color: #333333;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.hint-bottom {
+  color: #333333;
+  font-size: 14px;
+  font-weight: 500;
 }
 
 .legend.small .legend-title,
@@ -1329,6 +1352,15 @@ defineExpose({
 .legend.small .legend-item {
   font-size: 11px;
   margin-bottom: 4px;
+}
+
+[data-theme="dark"] .hint-container {
+  background: rgba(0, 0, 0, 0.6);
+}
+
+[data-theme="dark"] .hint,
+[data-theme="dark"] .hint-bottom {
+  color: #ffffff;
 }
 
 .legend.large .legend-title,
