@@ -1358,13 +1358,13 @@ defineExpose({
   font-weight: 500;
 }
 
-.legend.small .legend-title,
-.hint.small,
-.hint-bottom.small {
+.small .legend-title,
+.small .hint,
+.small .hint-bottom {
   font-size: 12px;
 }
 
-.legend.small .legend-item {
+.small .legend-item {
   font-size: 11px;
   margin-bottom: 4px;
 }
@@ -1378,18 +1378,18 @@ defineExpose({
   color: #ffffff;
 }
 
-.legend.large .legend-title,
-.hint.large,
-.hint-bottom.large {
+.large .legend-title,
+.large .hint,
+.large .hint-bottom {
   font-size: 16px;
 }
 
-.legend.large .legend-item {
+.large .legend-item {
   font-size: 14px;
   margin-bottom: 8px;
 }
 
-.legend.large .legend-color {
+.large .legend-color {
   width: 24px;
   height: 16px;
 }
