@@ -32,6 +32,7 @@ app.use("/api/auth", authRoutes);
 
 const publicBuildingRoutes = require("./routes/public-buildings");
 app.use("/api/public", publicBuildingRoutes);
+app.use("/api/nofly", noflyRoutes);
 
 app.use(authMiddleware);
 
