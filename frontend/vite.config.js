@@ -23,6 +23,11 @@ export default defineConfig({
         target: 'http://localhost:3000',
         changeOrigin: true,
       },
+      '/osm': {
+        target: 'https://tile.openstreetmap.org',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/osm/, ''),
+      },
     },
   },
 })

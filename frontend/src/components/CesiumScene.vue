@@ -892,14 +892,44 @@ function initCesiumViewer() {
     selectionIndicator: false,
     shouldAnimate: true,
     sceneMode: Cesium.SceneMode.SCENE3D,
-    baseLayer: new Cesium.ImageryLayer(
-      new Cesium.OpenStreetMapImageryProvider({
-        url: 'https://tile.openstreetmap.org/'
-      })
-    )
+    imageryProvider: new Cesium.UrlTemplateImageryProvider({
+      url: '/osm/{z}/{x}/{y}.png',
+      minimumLevel: 0,
+      maximumLevel: 18,
+      tileWidth: 256,
+      tileHeight: 256,
+      maximumRequests: 64,
+      credit: ''
+    })
   })
 
+  viewer.imageryLayers.removeAll()
+  viewer.imageryLayers.addImageryLayer(
+    new Cesium.UrlTemplateImageryProvider({
+      url: '/osm/{z}/{x}/{y}.png',
+      minimumLevel: 0,
+      maximumLevel: 18,
+      tileWidth: 256,
+      tileHeight: 256,
+      maximumRequests: 64,
+      credit: ''
+    })
+  )
+
   viewer.cesiumWidget.creditContainer.style.display = 'none'
+
+  viewer.scene.globe.maximumScreenSpaceError = 4
+
+  viewer.scene.globe.preloadTiles = true
+  viewer.scene.globe.tileCacheSize = 500
+
+  setTimeout(() => {
+    viewer.scene.globe.maximumScreenSpaceError = 2
+  }, 2000)
+
+  setTimeout(() => {
+    viewer.scene.globe.maximumScreenSpaceError = 1
+  }, 4000)
 
   viewer.camera.setView({
     destination: Cesium.Cartesian3.fromDegrees(-118.2437, 34.0522, 18000),
