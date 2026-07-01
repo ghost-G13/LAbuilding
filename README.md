@@ -126,7 +126,7 @@ LAbuilding/
 | 飞行区域碰撞预警 | 绘制飞行范围，检测与建筑碰撞 |
 | 用户认证 | 登录/注册，邮箱验证码，图片验证码，密码强度检测 |
 | 数据筛选 | 按高度/面积范围筛选建筑，高亮显示结果 |
-| 禁飞区图层 | 显示无人机禁飞区域 |
+| 禁飞区图层 | 显示无人机禁飞区域，点选显示名称、面积（km²）、标注，支持中英文切换 |
 | 相机漫游 | 页面加载时自动漫游到数据区域 |
 | 多语言切换 | 中文/英文界面切换 |
 | 页面交互 | 鼠标左键旋转、滚轮缩放、右键平移 |
@@ -141,6 +141,7 @@ LAbuilding/
 | `/api/auth/captcha` | 获取图片验证码 | 否 |
 | `/api/public/buildings` | 公开建筑数据查询 | 否 |
 | `/api/public/nofly-zones` | 公开禁飞区数据 | 否 |
+| `/api/nofly/zones` | 禁飞区数据查询（支持多语言） | 否 |
 | `/api/buildings` | 建筑数据查询 | 是 |
 | `/api/nofly` | 禁飞区数据管理 | 是 |
 | `/api/build` | 低空选址筛选 | 是 |
@@ -160,7 +161,9 @@ LAbuilding/
 ### 禁飞区数据
 
 - **数量**：32个禁飞区域
-- **字段**：zone_id、zone_name、restrict、height_met、Area
+- **字段**：bid、zone_id、zone_name、restrict、note、flight_cei、height_met、area、geom
+- **多语言支持**：note字段支持中英文对照（格式：英文 | 中文），restrict和zone_category字段支持中英文翻译
+- **面积单位**：km²
 
 ## 快速开始
 

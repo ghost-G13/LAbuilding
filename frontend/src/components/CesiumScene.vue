@@ -50,7 +50,7 @@ const i18n = {
 const t = computed(() => i18n[props.currentLanguage] || i18n['zh-CN'])
 
 const BUILDING_API_URL = '/api/public/buildings'
-const NO_FLY_ZONE_API_URL = '/api/public/nofly-zones'
+const NO_FLY_ZONE_API_URL = '/api/nofly/zones'
 
 const cesiumContainer = ref(null)
 const buildingLoadingText = ref('建筑白模：正在从服务器获取数据...')
@@ -270,7 +270,8 @@ async function loadNoFlyZone() {
     return
   }
   try {
-    const response = await fetch(NO_FLY_ZONE_API_URL)
+    const langParam = props.currentLanguage === 'en' ? 'en' : 'zh'
+    const response = await fetch(`${NO_FLY_ZONE_API_URL}?lang=${langParam}`)
     const result = await response.json()
 
     if (result.code !== 0) {
@@ -1012,8 +1013,18 @@ function setupBuildingClickHandler() {
       selectedNoFlyZone.polygon.outlineWidth = 4
       
       const name = entity.properties?.zone_name?.getValue() || (props.currentLanguage === 'en' ? 'Unnamed No-Fly Zone' : '未命名禁飞区')
-      const area = getEntityArea(entity)
-      const note = entity.properties?.note?.getValue() || ''
+      const area = Number(entity.properties?.area?.getValue()) || getEntityArea(entity)
+      const rawNote = entity.properties?.note?.getValue() || ''
+      
+      let note = ''
+      if (rawNote) {
+        const parts = rawNote.split(' | ')
+        if (parts.length === 2) {
+          note = props.currentLanguage === 'en' ? parts[0] : parts[1]
+        } else {
+          note = rawNote
+        }
+      }
       
       const wrapText = (text, maxLength) => {
         if (!text) return ''
@@ -1032,7 +1043,6 @@ function setupBuildingClickHandler() {
         return result.join('\n')
       }
       
-      const wrappedName = wrapText(name, 12)
       const noteLabel = props.currentLanguage === 'en' ? 'Note:' : '标注:'
       const areaLabel = props.currentLanguage === 'en' ? 'Area:' : '面积:'
       const wrappedNote = note ? `${noteLabel}\n${wrapText(note, 15)}` : ''
@@ -1046,7 +1056,7 @@ function setupBuildingClickHandler() {
       selectedNoFlyZoneLabel = viewer.entities.add({
         position: Cesium.Cartesian3.fromDegrees(longitude, latitude, 60),
         label: {
-          text: `${wrappedName}\n${areaLabel} ${area.toFixed(1)}m²${wrappedNote ? `\n${wrappedNote}` : ''}`,
+          text: `${name}\n${areaLabel} ${area.toFixed(1)}km²${wrappedNote ? `\n${wrappedNote}` : ''}`,
           font: '10pt sans-serif',
           fillColor: Cesium.Color.WHITE,
           outlineColor: Cesium.Color.BLACK,
@@ -1196,9 +1206,14 @@ function initCesiumViewer() {
   })
 }
 
-watch(() => props.currentLanguage, () => {
+watch(() => props.currentLanguage, async () => {
   if (buildingCount.value > 0) {
     buildingLoadingText.value = t.value.loaded.replace('{count}', buildingCount.value)
+  }
+  if (noFlyZoneDataSource) {
+    viewer.dataSources.remove(noFlyZoneDataSource)
+    noFlyZoneDataSource = null
+    await loadNoFlyZone()
   }
 })
 
