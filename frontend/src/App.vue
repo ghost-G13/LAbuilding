@@ -45,6 +45,8 @@ const isRegisterMode = ref(false)
 const isLoggedIn = ref(false)
 const loggedInUser = ref(null)
 const showUserMenu = ref(false)
+const showTermsModal = ref(false)
+const termsModalType = ref('service')
 
 const loginForm = ref({
   account: '',
@@ -198,6 +200,15 @@ const closeLogin = () => {
   registerError.value = ''
 }
 
+const openTermsModal = (type) => {
+  termsModalType.value = type
+  showTermsModal.value = true
+}
+
+const closeTermsModal = () => {
+  showTermsModal.value = false
+}
+
 const handleLogout = () => {
   isLoggedIn.value = false
   loggedInUser.value = null
@@ -295,7 +306,7 @@ const i18n = {
     loginAccount: '账号登录',
     registerHint: '已有账号可返回登录',
     loginHint: '未注册账号可切换前往注册',
-    account: '请输入手机号/用户名',
+    account: '请输入用户名/邮箱',
     password: '请输入登录密码',
     captcha: '请输入验证码',
     getCaptcha: '获取验证码',
@@ -348,7 +359,33 @@ const i18n = {
     coordinateRange: '经纬度范围',
     hectare: '公顷',
     pleaseDraw: '请绘制',
-    warningNoFlyZone: '警告：在禁飞区内！'
+    warningNoFlyZone: '警告：在禁飞区内！',
+    usernameOrEmail: '用户名/邮箱',
+    serviceAgreement: '用户服务协议',
+    privacyPolicy: '隐私政策',
+    agreeTerms: '我已阅读并同意',
+    and: '和',
+    articleOne: '一、协议概述',
+    articleTwo: '二、用户账号规范',
+    articleThree: '三、系统使用权责',
+    articleFour: '四、服务变更与终止',
+    articleFive: '五、其他约定',
+    serviceArticleOne: '本《用户服务协议》是您与本城市低空三维空域可视化管理系统运营方之间订立的有效合约。您完成账号注册、勾选同意框并点击"完成注册"按钮，即代表已完整阅读、理解并自愿接受本协议全部条款，承诺遵守系统使用规范、空域数据管理相关要求。本系统面向低空交通规划师、运营调度人员、安全监管人员提供洛杉矶三维建筑白模展示、起降点分析、航线碰撞预警、空域分区可视化等专业低空业务工具，仅服务合法低空规划、监管工作，禁止一切违规使用行为。',
+    serviceArticleTwo: '用户注册需填写真实、有效的用户名与手机号码，手机号用于身份核验、账号安全提醒，严禁冒用他人手机号、虚假信息注册账号。账号、登录密码由用户自行保管，因密码泄露、转借账号产生的全部操作风险与责任由用户自行承担。单个账号仅限注册人本人专业工作使用，不得转借、出租、出售账号；若系统检测到账号异地频繁登录、多人共用，运营方有权临时冻结账号并核验用户身份。用户遗忘密码可通过绑定手机号验证码找回，如需更换绑定手机号，需完成二次身份验证。',
+    serviceArticleThree: '系统提供的洛杉矶建筑三维白模、空域管制边界、建筑属性、航线分析结果等空间数据，仅可用于合法低空规划、无人机调度、空域安全监管工作。未经运营方书面许可，用户不得批量导出、复制、传播、商用本系统矢量空间数据、三维场景模型。用户使用起降点筛选、航线碰撞检测功能时，需知晓系统分析结果仅作为规划参考，实际无人机飞行、空域作业仍需遵循FAA低空管制法规，系统不对实际飞行安全承担最终责任。用户不得利用系统从事危害空域安全、篡改空间数据、恶意批量请求接口、破坏系统稳定等行为，禁止通过爬虫、破解等方式非法获取后台数据库原始数据，违规者运营方有权永久注销账号，并保留追究法律责任的权利。',
+    serviceArticleFour: '运营方有权根据业务升级、政策要求优化系统功能、调整服务内容，功能变更将通过系统弹窗通知用户。用户连续180天未登录账号，运营方可清理闲置账号数据；用户存在违规使用行为时，平台可直接终止服务、注销账号。用户主动申请注销账号后，系统将脱敏清理个人账号信息，空域分析记录将按监管留存要求加密保存。',
+    serviceArticleFive: '本协议依据数据安全、地理信息管理相关法规制定，若国家、地区低空管理政策更新，运营方可修订协议并公示，用户持续使用系统即视为接受更新条款。协议履行产生争议，双方优先协商解决，协商不成可向运营方所在地人民法院提起诉讼。',
+    privacyArticleOne: '一、信息收集说明',
+    privacyArticleTwo: '二、信息使用规则',
+    privacyArticleThree: '三、信息存储与保护',
+    privacyArticleFour: '四、用户权利',
+    privacyArticleFive: '五、政策更新',
+    privacyArticleOneContent: '本系统严格遵循地理信息数据安全、个人信息保护相关法规，仅收集提供低空可视化服务必需的最小范围个人信息。注册阶段仅收集用户名、手机号码；系统运行过程中会记录账号操作日志、起降点分析参数、航线规划记录、空域查询记录，用于功能校验、故障排查、低空监管溯源，不会收集与业务无关的隐私信息。系统不会主动获取用户手机相册、通讯录、定位等额外权限信息。',
+    privacyArticleTwoContent: '手机号仅用于账号注册核验、登录安全校验、账号异常提醒，不会用于商业营销短信推送；用户名用于系统内操作身份展示，无对外公开渠道。航线、建筑、空域分析记录仅存储于加密数据库，仅用户本人、合规监管工作人员可查询，不会向第三方企业、无关机构泄露、出售用户操作数据。系统基于操作日志优化三维渲染、空间分析算法时，所有数据均做匿名脱敏处理，无法关联到具体自然人。仅在收到执法机关合法文书要求时，运营方才会按法定流程提供相关业务记录，除此之外绝不主动披露用户任何个人信息。',
+    privacyArticleThreeContent: '用户个人账号信息、低空业务数据存储于加密PostGIS数据库，数据库配置访问权限校验、定期数据备份、GIST索引加密防护，防止空间矢量数据、个人信息泄露、篡改。系统设置访问日志审计机制，记录所有后台数据调取行为，全程可追溯。个人信息存储期限至账号注销后1年，到期自动彻底删除；低空空域业务记录按行业监管要求留存3年，到期脱敏销毁。',
+    privacyArticleFourContent: '用户有权登录账号查看、修改个人注册信息，可申请导出自身所有航线、起降点分析记录；若认为个人信息存在错误、泄露风险，可联系运营方申请更正、防护处理；用户申请注销账号后，平台将清除手机号、用户名等可识别个人信息。用户若不同意本隐私政策，可停止注册、放弃使用本系统全部功能。',
+    privacyArticleFiveContent: '运营方会根据个人信息保护法规、低空数据管理要求适时更新本隐私政策，更新后将在注册、登录弹窗公示，用户继续使用系统即代表认可更新后的条款。若对隐私政策存在疑问，可通过平台预留渠道联系运营方咨询。',
+    termsDate: '2026年7月1日'
   },
   'en': {
     title: 'Urban Low-Altitude 3D Building Visualization & Analysis System',
@@ -442,7 +479,33 @@ const i18n = {
     coordinateRange: 'Coord Range',
     hectare: 'ha',
     pleaseDraw: 'Please Draw',
-    warningNoFlyZone: 'Warning: In No-Fly Zone!'
+    warningNoFlyZone: 'Warning: In No-Fly Zone!',
+    usernameOrEmail: 'Username/Email',
+    serviceAgreement: 'User Service Agreement',
+    privacyPolicy: 'Privacy Policy',
+    agreeTerms: 'I have read and agree to the',
+    and: 'and',
+    articleOne: 'I. Agreement Overview',
+    articleTwo: 'II. User Account Rules',
+    articleThree: 'III. System Usage Rights and Responsibilities',
+    articleFour: 'IV. Service Changes and Termination',
+    articleFive: 'V. Other Provisions',
+    serviceArticleOne: 'This User Service Agreement is a valid contract between you and the operator of this Urban Low-Altitude 3D Airspace Visualization Management System. By completing account registration, checking the agreement box, and clicking the "Complete Registration" button, you represent that you have fully read, understood, and voluntarily accepted all terms of this agreement, and promise to comply with system usage specifications and airspace data management requirements. This system provides professional low-altitude business tools such as Los Angeles 3D building white model display, takeoff and landing point analysis, route collision warning, and airspace zoning visualization for low-altitude traffic planners, operation dispatchers, and safety supervisors. It only serves legitimate low-altitude planning and supervision work, and prohibits all unauthorized use.',
+    serviceArticleTwo: 'Users must provide true and valid usernames and phone numbers during registration. Phone numbers are used for identity verification and account security reminders. It is strictly prohibited to register with another person\'s phone number or false information. Users are responsible for keeping their account and login password secure. All operational risks and liabilities arising from password leaks or account lending shall be borne by the user. A single account is for the registered user\'s professional work use only and may not be lent, rented, or sold. If the system detects frequent logins from different locations or shared account usage, the operator reserves the right to temporarily freeze the account and verify the user\'s identity. Users can retrieve forgotten passwords through SMS verification codes sent to their bound phone numbers. To change the bound phone number, users must complete secondary identity verification.',
+    serviceArticleThree: 'Spatial data provided by the system, including Los Angeles building 3D white models, airspace control boundaries, building attributes, and route analysis results, may only be used for legitimate low-altitude planning, drone dispatch, and airspace safety supervision. Without the operator\'s written permission, users may not batch export, copy, distribute, or commercially use the system\'s vector spatial data or 3D scene models. When using takeoff and landing point filtering or route collision detection functions, users must understand that the system\'s analysis results are for planning reference only. Actual drone flights and airspace operations must comply with FAA low-altitude control regulations. The system does not assume final responsibility for actual flight safety. Users shall not use the system to engage in activities that endanger airspace safety, tamper with spatial data, maliciously batch request interfaces, or disrupt system stability. Crawling, cracking, or other means of illegally obtaining raw data from the backend database is prohibited. Violators may have their accounts permanently revoked, and the operator reserves the right to pursue legal action.',
+    serviceArticleFour: 'The operator reserves the right to optimize system functions and adjust service content based on business upgrades and policy requirements. Function changes will be notified to users through system pop-ups. If a user does not log in for 180 consecutive days, the operator may clean up the idle account data. If a user violates usage rules, the platform may directly terminate services and revoke the account. After a user voluntarily applies for account cancellation, the system will desensitize and clean up personal account information, and airspace analysis records will be encrypted and stored in accordance with regulatory retention requirements.',
+    serviceArticleFive: 'This agreement is formulated in accordance with relevant regulations on data security and geographic information management. If national or regional low-altitude management policies are updated, the operator may revise the agreement and publish it. Continued use of the system by users shall be deemed acceptance of the updated terms. In case of disputes arising from the performance of this agreement, the parties shall first attempt to resolve them through negotiation. If negotiation fails, a lawsuit may be filed with the people\'s court in the operator\'s location.',
+    privacyArticleOne: 'I. Information Collection',
+    privacyArticleTwo: 'II. Information Usage Rules',
+    privacyArticleThree: 'III. Information Storage and Protection',
+    privacyArticleFour: 'IV. User Rights',
+    privacyArticleFive: 'V. Policy Updates',
+    privacyArticleOneContent: 'This system strictly complies with relevant regulations on geographic information data security and personal information protection. It only collects the minimum range of personal information necessary to provide low-altitude visualization services. During registration, only usernames and phone numbers are collected. During system operation, the system records account operation logs, takeoff and landing point analysis parameters, route planning records, and airspace query records for function verification, fault diagnosis, and low-altitude supervision traceability. It does not collect privacy information unrelated to business. The system does not actively obtain additional permissions such as user\'s mobile phone photo album, contacts, or location.',
+    privacyArticleTwoContent: 'Phone numbers are only used for account registration verification, login security verification, and account anomaly reminders. They are not used for commercial marketing SMS. Usernames are used for identity display within the system and have no external public channels. Route, building, and airspace analysis records are stored only in encrypted databases and can be queried only by the user and compliant regulatory staff. They are not disclosed or sold to third-party enterprises or unrelated institutions. When the system optimizes 3D rendering and spatial analysis algorithms based on operation logs, all data is anonymized and desensitized and cannot be linked to specific individuals. Only when receiving legal documents from law enforcement agencies will the operator provide relevant business records in accordance with legal procedures. Except for this, no user personal information is actively disclosed.',
+    privacyArticleThreeContent: 'User personal account information and low-altitude business data are stored in an encrypted PostGIS database. The database is configured with access permission verification, regular data backup, and GIST index encryption protection to prevent spatial vector data and personal information from being leaked or tampered with. The system has an access log audit mechanism that records all backend data access activities and is fully traceable. Personal information is stored for 1 year after account cancellation and is automatically and completely deleted upon expiration. Low-altitude airspace business records are retained for 3 years in accordance with industry regulatory requirements and are desensitized and destroyed upon expiration.',
+    privacyArticleFourContent: 'Users have the right to log in to their accounts to view and modify personal registration information and can apply to export all their route and takeoff/landing point analysis records. If users believe their personal information contains errors or has a risk of leakage, they can contact the operator to request correction or protection measures. After a user applies for account cancellation, the platform will clear identifiable personal information such as phone numbers and usernames. If users do not agree with this privacy policy, they may stop registration and abandon all system functions.',
+    privacyArticleFiveContent: 'The operator will update this privacy policy from time to time in accordance with personal information protection regulations and low-altitude data management requirements. After updates, the policy will be displayed in registration and login pop-ups. Continued use of the system by users shall be deemed recognition of the updated terms. If users have questions about the privacy policy, they can contact the operator through the reserved channels.',
+    termsDate: 'July 1, 2026'
   }
 }
 
@@ -803,7 +866,7 @@ onMounted(() => {
                   <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
                   <circle cx="12" cy="7" r="4"></circle>
                 </svg>
-                <input type="text" v-model="loginForm.account" :placeholder="t.account" class="modal-input" @keyup.enter="handleLogin">
+                <input type="text" v-model="loginForm.account" :placeholder="t.usernameOrEmail" class="modal-input" @keyup.enter="handleLogin">
               </div>
               <span v-if="!loginForm.account.trim()" class="input-error">{{ t.account }}</span>
             </div>
@@ -950,7 +1013,7 @@ onMounted(() => {
             
             <label class="checkbox-label terms-checkbox">
               <input type="checkbox" v-model="registerForm.agreeTerms">
-              <span>{{ t.agreeTerms }}<a href="#">{{ t.privacyPolicy }}</a></span>
+              <span>{{ t.agreeTerms }}<a href="#" @click.prevent="openTermsModal('service')">{{ t.serviceAgreement }}</a>{{ t.and }}<a href="#" @click.prevent="openTermsModal('privacy')">{{ t.privacyPolicy }}</a></span>
             </label>
             
             <span v-if="registerError" class="form-error">{{ registerError }}</span>
@@ -1022,6 +1085,54 @@ onMounted(() => {
       <div class="settings-footer">
         <button class="settings-btn apply-btn" @click="applySettings">{{ t.apply }}</button>
         <button class="settings-btn cancel-btn" @click="closeSettings">{{ t.cancel }}</button>
+      </div>
+    </div>
+  </div>
+
+  <div v-if="showTermsModal" class="modal-overlay" @click.self="closeTermsModal">
+    <div class="terms-modal">
+      <div class="terms-header">
+        <h2 class="terms-title">{{ termsModalType === 'service' ? t.serviceAgreement : t.privacyPolicy }}</h2>
+        <button class="modal-close" @click="closeTermsModal">×</button>
+      </div>
+      <div class="terms-body">
+        <div v-if="termsModalType === 'service'">
+          <h3>{{ t.articleOne }}</h3>
+          <p>{{ t.serviceArticleOne }}</p>
+          
+          <h3>{{ t.articleTwo }}</h3>
+          <p>{{ t.serviceArticleTwo }}</p>
+          
+          <h3>{{ t.articleThree }}</h3>
+          <p>{{ t.serviceArticleThree }}</p>
+          
+          <h3>{{ t.articleFour }}</h3>
+          <p>{{ t.serviceArticleFour }}</p>
+          
+          <h3>{{ t.articleFive }}</h3>
+          <p>{{ t.serviceArticleFive }}</p>
+        </div>
+        
+        <div v-else>
+          <h3>{{ t.privacyArticleOne }}</h3>
+          <p>{{ t.privacyArticleOneContent }}</p>
+          
+          <h3>{{ t.privacyArticleTwo }}</h3>
+          <p>{{ t.privacyArticleTwoContent }}</p>
+          
+          <h3>{{ t.privacyArticleThree }}</h3>
+          <p>{{ t.privacyArticleThreeContent }}</p>
+          
+          <h3>{{ t.privacyArticleFour }}</h3>
+          <p>{{ t.privacyArticleFourContent }}</p>
+          
+          <h3>{{ t.privacyArticleFive }}</h3>
+          <p>{{ t.privacyArticleFiveContent }}</p>
+        </div>
+        
+        <div class="terms-footer">
+          <p>{{ t.termsDate }}</p>
+        </div>
       </div>
     </div>
   </div>
@@ -2138,6 +2249,82 @@ html, body, #app {
 
 .settings-btn.cancel-btn:hover {
   background-color: #eee;
+}
+
+.terms-modal {
+  background-color: #ffffff;
+  border-radius: 16px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
+  width: 90%;
+  max-width: 640px;
+  max-height: 80vh;
+  overflow: hidden;
+  animation: slideUp 0.3s ease;
+}
+
+.terms-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px 24px;
+  border-bottom: 1px solid #eee;
+  background-color: #fafafa;
+}
+
+.terms-title {
+  font-size: 20px;
+  font-weight: bold;
+  color: #333;
+  margin: 0;
+}
+
+.terms-body {
+  padding: 24px;
+  overflow-y: auto;
+  max-height: calc(80vh - 120px);
+}
+
+.terms-body h3 {
+  font-size: 16px;
+  font-weight: bold;
+  color: #333;
+  margin: 20px 0 10px 0;
+  padding-left: 12px;
+  border-left: 3px solid #00897B;
+}
+
+.terms-body h3:first-child {
+  margin-top: 0;
+}
+
+.terms-body p {
+  font-size: 14px;
+  color: #555;
+  line-height: 1.8;
+  margin: 0 0 16px 0;
+  text-align: justify;
+}
+
+.terms-footer {
+  text-align: center;
+  padding: 16px 0 0 0;
+  margin-top: 16px;
+  border-top: 1px solid #eee;
+}
+
+.terms-footer p {
+  font-size: 12px;
+  color: #999;
+  margin: 0;
+}
+
+.terms-body a {
+  color: #00897B;
+  text-decoration: none;
+}
+
+.terms-body a:hover {
+  text-decoration: underline;
 }
 
 @keyframes slideIn {
