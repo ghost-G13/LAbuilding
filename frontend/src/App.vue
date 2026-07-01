@@ -543,8 +543,14 @@ const closeSettings = () => {
 
 const toggleBasemap = () => {
   currentBasemap.value = currentBasemap.value === 'osm' ? 'satellite' : 'osm'
-  if (window.switchBasemap) {
-    window.switchBasemap(currentBasemap.value)
+  if (window.osmLayer && window.satelliteLayer) {
+    if (currentBasemap.value === 'osm') {
+      window.osmLayer.show = true
+      window.satelliteLayer.show = false
+    } else {
+      window.osmLayer.show = false
+      window.satelliteLayer.show = true
+    }
   }
 }
 

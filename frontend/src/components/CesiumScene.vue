@@ -58,7 +58,6 @@ let pointEntities = []
 let currentColorState = 'uniform'
 let colorUpdateTimer = null
 let filterBlinkTimer = null
-let imageryLayers = []
 
 const HEIGHT_LEVELS = [
   { min: 0, max: 5, color: Cesium.Color.fromCssColorString('rgba(65, 105, 225, 0.75)'), name: 'height_0_5' },
@@ -1122,11 +1121,6 @@ function initCesiumViewer() {
   const osmProvider = new Cesium.OpenStreetMapImageryProvider({
     url: 'https://tile.openstreetmap.org/'
   })
-  
-  const satelliteProvider = new Cesium.UrlTemplateImageryProvider({
-    url: 'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-    maximumLevel: 18
-  })
 
   viewer = new Cesium.Viewer(cesiumContainer.value, {
     animation: false,
@@ -1146,13 +1140,16 @@ function initCesiumViewer() {
 
   viewer.cesiumWidget.creditContainer.style.display = 'none'
 
-  imageryLayers = [
-    viewer.scene.imageryLayers.get(0)
-  ]
+  const satelliteProvider = new Cesium.UrlTemplateImageryProvider({
+    url: 'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    maximumLevel: 18
+  })
   
   const satelliteLayer = viewer.scene.imageryLayers.addImageryProvider(satelliteProvider)
   satelliteLayer.show = false
-  imageryLayers.push(satelliteLayer)
+  
+  window.osmLayer = viewer.scene.imageryLayers.get(0)
+  window.satelliteLayer = satelliteLayer
 
   viewer.camera.setView({
     destination: Cesium.Cartesian3.fromDegrees(-118.2437, 34.0522, 18000),
@@ -1178,7 +1175,6 @@ function initCesiumViewer() {
   window.filterBuildings = filterBuildings
   window.resetBuildingColors = resetBuildingColors
   window.checkRouteCollision = checkRouteCollision
-  window.switchBasemap = switchBasemap
   Object.defineProperty(window, 'collisionCallback', {
     get: () => collisionCallback,
     set: (val) => { collisionCallback = val }
@@ -1187,18 +1183,6 @@ function initCesiumViewer() {
     get: () => filterCallback,
     set: (val) => { filterCallback = val }
   })
-}
-
-function switchBasemap(type) {
-  if (imageryLayers.length !== 2) return
-  
-  if (type === 'osm') {
-    imageryLayers[0].show = true
-    imageryLayers[1].show = false
-  } else {
-    imageryLayers[0].show = false
-    imageryLayers[1].show = true
-  }
 }
 
 onMounted(() => {
