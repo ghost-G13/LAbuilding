@@ -1,7 +1,41 @@
 <script setup>
-import { onMounted, onBeforeUnmount, ref, defineExpose } from 'vue'
+import { onMounted, onBeforeUnmount, ref, watch, defineExpose, computed } from 'vue'
 import * as Cesium from 'cesium'
 import 'cesium/Build/Cesium/Widgets/widgets.css'
+
+const props = defineProps({
+  currentLanguage: {
+    type: String,
+    default: 'zh-CN'
+  },
+  currentFontSize: {
+    type: String,
+    default: 'medium'
+  },
+  currentTheme: {
+    type: String,
+    default: 'light'
+  }
+})
+
+const i18n = {
+  'zh-CN': {
+    legendTitle: '建筑高度分级',
+    hintBottom: '鼠标左键拖拽：旋转视角 ｜ 滚轮：缩放 ｜ 右键拖拽：平移',
+    height: '高度',
+    area: '面积',
+    m2: 'm²'
+  },
+  'en': {
+    legendTitle: 'Height Levels',
+    hintBottom: 'Left drag: Rotate ｜ Scroll: Zoom ｜ Right drag: Pan',
+    height: 'Height',
+    area: 'Area',
+    m2: 'm²'
+  }
+}
+
+const t = computed(() => i18n[props.currentLanguage] || i18n['zh-CN'])
 
 const BUILDING_API_URL = '/api/public/buildings'
 const NO_FLY_ZONE_API_URL = '/api/public/nofly-zones'
@@ -1003,8 +1037,8 @@ defineExpose({
   <div class="cesium-wrapper">
     <div ref="cesiumContainer" class="cesium-container"></div>
 
-    <div class="legend" v-show="showLegend">
-      <div class="legend-title">建筑高度分级</div>
+    <div class="legend" v-show="showLegend" :class="currentFontSize">
+      <div class="legend-title">{{ t.legendTitle }}</div>
       <div class="legend-item">
         <span class="legend-color" style="background: rgba(65, 105, 225, 0.75)"></span>
         <span>0-5m</span>
@@ -1035,8 +1069,8 @@ defineExpose({
       </div>
     </div>
 
-    <div class="hint">{{ buildingLoadingText }}</div>
-    <div class="hint-bottom">鼠标左键拖拽：旋转视角 ｜ 滚轮：缩放 ｜ 右键拖拽：平移</div>
+    <div class="hint" :class="currentFontSize">{{ buildingLoadingText }}</div>
+    <div class="hint-bottom" :class="currentFontSize">{{ t.hintBottom }}</div>
   </div>
 </template>
 
@@ -1111,5 +1145,32 @@ defineExpose({
   text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.7);
   z-index: 10;
   pointer-events: none;
+}
+
+.legend.small .legend-title,
+.hint.small,
+.hint-bottom.small {
+  font-size: 12px;
+}
+
+.legend.small .legend-item {
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+
+.legend.large .legend-title,
+.hint.large,
+.hint-bottom.large {
+  font-size: 16px;
+}
+
+.legend.large .legend-item {
+  font-size: 14px;
+  margin-bottom: 8px;
+}
+
+.legend.large .legend-color {
+  width: 24px;
+  height: 16px;
 }
 </style>
