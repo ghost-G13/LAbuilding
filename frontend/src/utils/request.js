@@ -16,15 +16,21 @@ async function request(url, options = {}) {
     headers['Authorization'] = `Bearer ${token}`
   }
 
+  console.log('[请求]', BASE_URL + url, options.body)
+  
   const response = await fetch(BASE_URL + url, {
     ...options,
     headers,
     body: options.body ? JSON.stringify(options.body) : undefined
   })
 
+  console.log('[响应]', response.status, response.statusText)
+  
   const data = await response.json()
+  
+  console.log('[响应数据]', JSON.stringify(data))
 
-  if (data.code === 401) {
+  if (data.code === 401 && !url.startsWith('/auth/')) {
     localStorage.removeItem('user')
     throw new Error('请先登录')
   }

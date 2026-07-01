@@ -4,6 +4,8 @@ const { query } = require("../utils/db");
 const redis = require("../utils/redis");
 const { generateToken } = require("../middleware/auth");
 const svgCaptcha = require("svg-captcha");
+const bcrypt = require("bcryptjs");
+const { sendVerificationCode } = require("../utils/mail");
 
 const generateCode = (length = 6) => {
   return Math.floor(Math.random() * Math.pow(10, length)).toString().padStart(length, "0");
@@ -13,32 +15,25 @@ const isEmail = (str) => {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(str);
 };
 
-const isPhone = (str) => {
-  return /^1[3-9]\d{9}$/.test(str);
-};
-
 router.post("/send-code", async (req, res) => {
   try {
-    const { identifier } = req.body;
+    const { email } = req.body;
 
-    if (!identifier) {
+    if (!email) {
       return res.status(400).json({
         code: 400,
-        message: "请输入手机号或邮箱",
+        message: "请输入邮箱",
       });
     }
 
-    const isEmailAddr = isEmail(identifier);
-    const isPhoneNum = isPhone(identifier);
-
-    if (!isEmailAddr && !isPhoneNum) {
+    if (!isEmail(email)) {
       return res.status(400).json({
         code: 400,
-        message: "请输入正确的手机号或邮箱",
+        message: "请输入正确的邮箱格式",
       });
     }
 
-    const rateLimitKey = `sms:limit:${identifier}`;
+    const rateLimitKey = `sms:limit:${email}`;
     const lastSent = await redis.get(rateLimitKey);
 
     if (lastSent) {
@@ -50,20 +45,31 @@ router.post("/send-code", async (req, res) => {
     }
 
     const code = generateCode(6);
-    const codeKey = `sms:code:${identifier}`;
+    const codeKey = `sms:code:${email}`;
     await redis.set(codeKey, code, 300);
     await redis.set(rateLimitKey, Date.now().toString(), 60);
 
-    console.log(`[验证码] ${identifier}: ${code}`);
-
-    res.json({
-      code: 0,
-      message: "验证码发送成功",
-      data: {
-        identifier,
-        expires_in: 300,
-      },
-    });
+    const mailResult = await sendVerificationCode(email, code);
+    
+    if (mailResult.success) {
+      console.log(`[验证码] ${email}: ${code}`);
+      res.json({
+        code: 0,
+        message: mailResult.message,
+        data: {
+          email,
+          expires_in: 300,
+        },
+      });
+    } else {
+      await redis.del(codeKey);
+      await redis.del(rateLimitKey);
+      res.status(500).json({
+        code: 500,
+        message: mailResult.message,
+        error: mailResult.error,
+      });
+    }
   } catch (error) {
     console.error("Send code error:", error);
     res.status(500).json({
@@ -86,8 +92,8 @@ router.get("/captcha", async (req, res) => {
 
     const captchaKey = `captcha:${Date.now()}`;
     await redis.set(captchaKey, captcha.text.toLowerCase(), 120);
+    console.log(`[验证码] ${captcha.text}`);
 
-    res.type("svg");
     res.send({
       code: 0,
       message: "success",
@@ -95,6 +101,7 @@ router.get("/captcha", async (req, res) => {
         image: captcha.data,
         captcha_key: captchaKey,
         expires_in: 120,
+        text: captcha.text,
       },
     });
   } catch (error) {
@@ -108,16 +115,23 @@ router.get("/captcha", async (req, res) => {
 
 router.post("/register", async (req, res) => {
   try {
-    const { username, password, identifier, code, role } = req.body;
+    const { username, password, email, code, role } = req.body;
 
-    if (!username || !password || !identifier || !code) {
+    if (!username || !password || !email || !code) {
       return res.status(400).json({
         code: 400,
         message: "请填写完整信息",
       });
     }
 
-    const codeKey = `sms:code:${identifier}`;
+    if (!isEmail(email)) {
+      return res.status(400).json({
+        code: 400,
+        message: "请输入正确的邮箱格式",
+      });
+    }
+
+    const codeKey = `sms:code:${email}`;
     const storedCode = await redis.get(codeKey);
 
     if (!storedCode) {
@@ -148,19 +162,24 @@ router.post("/register", async (req, res) => {
       });
     }
 
-    const isEmailAddr = isEmail(identifier);
-    let insertParams;
-    let insertSql;
+    const existingEmail = await query(
+      "SELECT id FROM users WHERE email = $1",
+      [email]
+    );
 
-    if (isEmailAddr) {
-      insertSql = "INSERT INTO users (username, password, email, email_verified, role) VALUES ($1, $2, $3, true, $4) RETURNING id, username, email, phone, role, created_at";
-      insertParams = [username, password, identifier, role || "user"];
-    } else {
-      insertSql = "INSERT INTO users (username, password, phone, phone_verified, role) VALUES ($1, $2, $3, true, $4) RETURNING id, username, email, phone, role, created_at";
-      insertParams = [username, password, identifier, role || "user"];
+    if (existingEmail.rows.length > 0) {
+      return res.status(400).json({
+        code: 400,
+        message: "该邮箱已被注册",
+      });
     }
 
-    const result = await query(insertSql, insertParams);
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const result = await query(
+      "INSERT INTO users (username, password, email, email_verified, role) VALUES ($1, $2, $3, true, $4) RETURNING id, username, email, role, created_at",
+      [username, hashedPassword, email, role || "user"]
+    );
 
     res.json({
       code: 0,
@@ -180,8 +199,10 @@ router.post("/register", async (req, res) => {
 router.post("/login", async (req, res) => {
   try {
     const { username, password, captcha_key, captcha_code } = req.body;
+    console.log("[登录请求] username:", username, "password:", password ? "***" : "empty", "captcha_key:", captcha_key ? "exists" : "missing", "captcha_code:", captcha_code);
 
     if (!username || !password) {
+      console.log("[登录失败] 用户名或密码为空");
       return res.status(400).json({
         code: 400,
         message: "用户名和密码不能为空",
@@ -189,6 +210,7 @@ router.post("/login", async (req, res) => {
     }
 
     if (!captcha_key || !captcha_code) {
+      console.log("[登录失败] 验证码为空");
       return res.status(400).json({
         code: 400,
         message: "请输入图形验证码",
@@ -196,8 +218,10 @@ router.post("/login", async (req, res) => {
     }
 
     const storedCaptcha = await redis.get(captcha_key);
+    console.log("[登录检查] storedCaptcha:", storedCaptcha, "captcha_code:", captcha_code.toLowerCase());
 
     if (!storedCaptcha) {
+      console.log("[登录失败] 验证码已过期");
       return res.status(400).json({
         code: 400,
         message: "验证码已过期，请重新获取",
@@ -205,6 +229,7 @@ router.post("/login", async (req, res) => {
     }
 
     if (storedCaptcha !== captcha_code.toLowerCase()) {
+      console.log("[登录失败] 验证码错误:", storedCaptcha, "!=", captcha_code.toLowerCase());
       return res.status(400).json({
         code: 400,
         message: "验证码错误",
@@ -213,12 +238,23 @@ router.post("/login", async (req, res) => {
 
     await redis.del(captcha_key);
 
+    console.log("[登录检查] 查询用户:", username);
     const result = await query(
-      "SELECT id, username, email, phone, role, created_at FROM users WHERE username = $1 AND password = $2",
-      [username, password]
+      "SELECT id, username, email, password, role, created_at FROM users WHERE username = $1",
+      [username]
     );
 
     if (result.rows.length === 0) {
+      console.log("[登录失败] 用户不存在");
+      return res.status(401).json({
+        code: 401,
+        message: "用户名或密码错误",
+      });
+    }
+
+    const isValidPassword = await bcrypt.compare(password, result.rows[0].password);
+    if (!isValidPassword) {
+      console.log("[登录失败] 密码错误");
       return res.status(401).json({
         code: 401,
         message: "用户名或密码错误",
