@@ -560,7 +560,7 @@ const applySettings = () => {
   closeSettings()
 }
 
-const filterTakeoffPoints = () => {
+const filterTakeoffPoints = async () => {
   if (!isInputComplete.value) return
   
   const minH = parseFloat(flightHeightMin.value)
@@ -568,15 +568,31 @@ const filterTakeoffPoints = () => {
   const minA = parseFloat(areaMin.value)
   const maxA = parseFloat(areaMax.value)
   
-  if (window.filterBuildings) {
-    hasFiltered.value = true
-    filteredCount.value = -1
+  hasFiltered.value = true
+  filteredCount.value = -1
+  filteredData.value = []
+  
+  try {
+    const response = await fetch(`/api/public/buildings?minHeight=${minH}&maxHeight=${maxH}&minArea=${minA}&maxArea=${maxA}&page=1&pageSize=1`)
+    const result = await response.json()
     
-    window.filterCallback = (result) => {
-      filteredCount.value = result.count
-      filteredData.value = result.data
+    if (result.code === 0) {
+      filteredCount.value = result.total
+      
+      if (window.filterBuildings) {
+        window.filterCallback = (callbackResult) => {
+          filteredData.value = callbackResult.data
+        }
+        const filterResult = window.filterBuildings(minH, maxH, minA, maxA)
+        filteredData.value = filterResult.data
+      }
+    } else {
+      console.error('筛选失败:', result.message)
+      filteredCount.value = 0
     }
-    window.filterBuildings(minH, maxH, minA, maxA)
+  } catch (error) {
+    console.error('筛选请求失败:', error)
+    filteredCount.value = 0
   }
 }
 
@@ -653,8 +669,8 @@ function checkCollision() {
 }
 
 watch(colorLayer, (val) => {
-  if (window.setColorLayer) {
-    window.setColorLayer(val)
+  if (window.setColorLayerByLevel) {
+    window.setColorLayerByLevel(val)
   }
 })
 
@@ -669,8 +685,8 @@ const validateCollisionHeight = () => {
 }
 
 onMounted(() => {
-  if (window.setColorLayer) {
-    window.setColorLayer(colorLayer.value)
+  if (window.setColorLayerByLevel) {
+    window.setColorLayerByLevel(colorLayer.value)
   }
   if (window.setNoFlyZoneLayer) {
     window.setNoFlyZoneLayer(noFlyZoneLayer.value)
