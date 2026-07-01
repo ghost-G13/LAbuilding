@@ -43,21 +43,22 @@ const NO_FLY_ZONE_API_URL = '/api/public/nofly-zones'
 const cesiumContainer = ref(null)
 const buildingLoadingText = ref('建筑白模：正在从服务器获取数据...')
 const buildingCount = ref(0)
-const showLegend = ref(true)
+const showLegend = ref(false)
 const buildingTotal = ref(0)
 
 let viewer = null
 let buildingDataSources = []
 let noFlyZoneDataSource = null
-let colorMode = 'height'
+let colorMode = 'uniform'
 let drawingHandler = null
 let drawnPolygon = null
 let drawingHistory = []
 let pointEntities = []
 
-let currentColorState = 'height'
+let currentColorState = 'uniform'
 let colorUpdateTimer = null
 let filterBlinkTimer = null
+let imageryLayers = []
 
 const HEIGHT_LEVELS = [
   { min: 0, max: 5, color: Cesium.Color.fromCssColorString('rgba(65, 105, 225, 0.75)'), name: 'height_0_5' },
@@ -73,6 +74,13 @@ function getEntityHeight(entity) {
   if (!entity.polygon) return 10
   const p = entity.properties
   if (!p) return 10
+  
+  if (p.real_height !== undefined && p.real_height !== null) {
+    const h = Number(p.real_height)
+    if (!isNaN(h) && h > 1) {
+      return h
+    }
+  }
   
   if (heightField) {
     const h = Number(p[heightField])
@@ -194,14 +202,19 @@ async function loadBuildingWhiteModel(params = {}) {
       for (const entity of tempDataSource.entities.values) {
         if (!entity.polygon) continue
         
-        const height = parseFloat(entity.properties?.height) || 10
+        const realHeight = parseFloat(entity.properties?.height) || 10
+        const displayHeight = realHeight * 3
         
         entity.polygon.height = 0
-        entity.polygon.extrudedHeight = height
+        entity.polygon.extrudedHeight = displayHeight
         entity.polygon.closeTop = true
         entity.polygon.closeBottom = true
         entity.polygon.outline = false
         entity.polygon.material = color
+        
+        if (!entity.properties._propertyNames.includes('real_height')) {
+          entity.properties.real_height = realHeight
+        }
         
         ds.entities.add(entity)
       }
@@ -307,8 +320,8 @@ function applyColors(state, params = {}) {
 
 function applyFilterColors(params) {
   const { minHeight, maxHeight, minArea } = params
-  const highlightColor = Cesium.Color.fromCssColorString('rgba(0, 255, 128, 0.8)')
-  const highlightOutline = Cesium.Color.fromCssColorString('#00FF80')
+  const highlightColor = Cesium.Color.fromCssColorString('rgba(255, 235, 59, 0.8)')
+  const highlightOutline = Cesium.Color.fromCssColorString('#FFEB3B')
   
   const allEntities = []
   for (const ds of buildingDataSources) {
@@ -404,8 +417,8 @@ function startFilterBlinking(entities) {
   filterBlinkTimer = setInterval(() => {
     isBright = !isBright
     const color = isBright 
-      ? Cesium.Color.fromCssColorString('rgba(0, 255, 128, 0.8)')
-      : Cesium.Color.fromCssColorString('rgba(0, 255, 128, 0.4)')
+      ? Cesium.Color.fromCssColorString('rgba(255, 235, 59, 0.9)')
+      : Cesium.Color.fromCssColorString('rgba(255, 235, 59, 0.4)')
     
     for (const entity of entities) {
       if (entity.polygon) {
@@ -676,6 +689,11 @@ function getEntityArea(entity) {
   const p = entity.properties
   if (!p) return 0
   
+  if (p.area !== undefined && p.area !== null) {
+    const num = Number(p.area)
+    return isNaN(num) ? 0 : num
+  }
+  
   if (areaField) {
     const val = p[areaField]
     if (val !== undefined && val !== null) {
@@ -684,7 +702,7 @@ function getEntityArea(entity) {
     }
   }
   
-  const areaFields = ['area', 'area_m2', 'AREA', 'Area', 'building_area', 'area_m']
+  const areaFields = ['area_m2', 'AREA', 'Area', 'building_area', 'area_m']
   for (const field of areaFields) {
     const val = p[field]
     if (val !== undefined && val !== null) {
@@ -989,7 +1007,7 @@ function setupBuildingClickHandler() {
       selectedNoFlyZone.polygon.outlineColor = highlightOutline
       selectedNoFlyZone.polygon.outlineWidth = 4
       
-      const name = entity.properties?.zone_name?.getValue() || '未命名禁飞区'
+      const name = entity.properties?.zone_name?.getValue() || (props.currentLanguage === 'en' ? 'Unnamed No-Fly Zone' : '未命名禁飞区')
       const area = getEntityArea(entity)
       const note = entity.properties?.note?.getValue() || ''
       
@@ -1011,7 +1029,8 @@ function setupBuildingClickHandler() {
       }
       
       const wrappedName = wrapText(name, 12)
-      const wrappedNote = note ? `标注:\n${wrapText(note, 15)}` : ''
+      const noteLabel = props.currentLanguage === 'en' ? 'Note:' : '标注:'
+      const wrappedNote = note ? `${noteLabel}\n${wrapText(note, 15)}` : ''
       
       const hierarchy = entity.polygon.hierarchy.getValue()
       const center = getPolygonCentroid(hierarchy.positions)
@@ -1100,6 +1119,15 @@ function clearBuildingClickHandler() {
 }
 
 function initCesiumViewer() {
+  const osmProvider = new Cesium.OpenStreetMapImageryProvider({
+    url: 'https://tile.openstreetmap.org/'
+  })
+  
+  const satelliteProvider = new Cesium.UrlTemplateImageryProvider({
+    url: 'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    maximumLevel: 18
+  })
+
   viewer = new Cesium.Viewer(cesiumContainer.value, {
     animation: false,
     timeline: false,
@@ -1113,14 +1141,18 @@ function initCesiumViewer() {
     selectionIndicator: false,
     shouldAnimate: true,
     sceneMode: Cesium.SceneMode.SCENE3D,
-    baseLayer: new Cesium.ImageryLayer(
-      new Cesium.OpenStreetMapImageryProvider({
-        url: 'https://tile.openstreetmap.org/'
-      })
-    )
+    imageryProvider: osmProvider
   })
 
   viewer.cesiumWidget.creditContainer.style.display = 'none'
+
+  imageryLayers = [
+    viewer.scene.imageryLayers.get(0)
+  ]
+  
+  const satelliteLayer = viewer.scene.imageryLayers.addImageryProvider(satelliteProvider)
+  satelliteLayer.show = false
+  imageryLayers.push(satelliteLayer)
 
   viewer.camera.setView({
     destination: Cesium.Cartesian3.fromDegrees(-118.2437, 34.0522, 18000),
@@ -1146,6 +1178,7 @@ function initCesiumViewer() {
   window.filterBuildings = filterBuildings
   window.resetBuildingColors = resetBuildingColors
   window.checkRouteCollision = checkRouteCollision
+  window.switchBasemap = switchBasemap
   Object.defineProperty(window, 'collisionCallback', {
     get: () => collisionCallback,
     set: (val) => { collisionCallback = val }
@@ -1154,6 +1187,18 @@ function initCesiumViewer() {
     get: () => filterCallback,
     set: (val) => { filterCallback = val }
   })
+}
+
+function switchBasemap(type) {
+  if (imageryLayers.length !== 2) return
+  
+  if (type === 'osm') {
+    imageryLayers[0].show = true
+    imageryLayers[1].show = false
+  } else {
+    imageryLayers[0].show = false
+    imageryLayers[1].show = true
+  }
 }
 
 onMounted(() => {
