@@ -1040,7 +1040,14 @@ function setupBuildingClickHandler() {
       return
     }
     
-    if (!buildingDataSource || !buildingDataSource.entities.contains(entity)) {
+    let isBuilding = false
+    for (const ds of buildingDataSources) {
+      if (ds.entities.contains(entity)) {
+        isBuilding = true
+        break
+      }
+    }
+    if (!isBuilding) {
       return
     }
     
