@@ -285,6 +285,7 @@ const i18n = {
     filtering: '筛选中...',
     filteredResult: '已筛选出符合条件的起降点位：共',
     clearFilter: '清除筛选',
+    clearDrawing: '清除绘制',
     filter: '筛选',
     exportResults: '导出结果',
     collisionWarning: '02 飞行区域碰撞预警',
@@ -407,6 +408,7 @@ const i18n = {
     filtering: 'Filtering...',
     filteredResult: 'Filtered takeoff points:',
     clearFilter: 'Clear Filter',
+    clearDrawing: 'Clear Drawing',
     filter: 'Filter',
     exportResults: 'Export Results',
     collisionWarning: '02 Flight Zone Collision Warning',
@@ -621,6 +623,9 @@ const clearFilter = () => {
   hasFiltered.value = false
   filteredCount.value = 0
   filteredData.value = []
+  flightHeightMin.value = ''
+  flightHeightMax.value = ''
+  areaMin.value = ''
 }
 
 const exportResults = () => {
@@ -658,6 +663,8 @@ const clearDraw = () => {
   isDrawn.value = false
   isDrawing.value = false
   warningStatus.value = 'compliant'
+  collisionHeightMin.value = ''
+  collisionHeightMax.value = ''
 }
 
 window.onDrawComplete = () => {
@@ -879,7 +886,7 @@ onMounted(() => {
           </div>
           <div class="draw-actions" v-if="isDrawn">
             <button class="action-btn small" @click="drawRange">{{ t.drawRange }}</button>
-            <button class="action-btn small" @click="clearDraw">{{ t.clearFilter }}</button>
+            <button class="action-btn small" @click="clearDraw">{{ t.clearDrawing }}</button>
           </div>
         </div>
       </div>
@@ -1216,6 +1223,36 @@ html, body, #app {
   margin: 0;
   padding: 0;
   overflow: hidden;
+}
+
+.footer-note {
+  background-color: rgba(255, 255, 255, 0.6);
+  padding: 10px 14px;
+  border-radius: 8px;
+  backdrop-filter: blur(4px);
+}
+
+.footer-note p {
+  font-size: 11px;
+  color: #777777;
+  margin: 0;
+  text-align: center;
+}
+
+[data-font-size="small"] .footer-note {
+  padding: 8px 12px;
+}
+
+[data-font-size="small"] .footer-note p {
+  font-size: 10px;
+}
+
+[data-font-size="large"] .footer-note {
+  padding: 12px 16px;
+}
+
+[data-font-size="large"] .footer-note p {
+  font-size: 13px;
 }
 </style>
 
@@ -1833,20 +1870,6 @@ html, body, #app {
   color: #00897B;
 }
 
-.footer-note {
-  background-color: rgba(255, 255, 255, 0.6);
-  padding: 10px 14px;
-  border-radius: 8px;
-  backdrop-filter: blur(4px);
-}
-
-.footer-note p {
-  font-size: 11px;
-  color: #777777;
-  margin: 0;
-  text-align: center;
-}
-
 .modal-overlay {
   position: fixed;
   top: 0;
@@ -2462,15 +2485,29 @@ html, body, #app {
 }
 
 [data-font-size="small"] .function-card,
-[data-font-size="small"] .layer-control,
 [data-font-size="small"] .stats-card {
   padding: 12px;
 }
 
+[data-font-size="small"] .layer-section {
+  padding: 8px 12px;
+}
+
+[data-font-size="small"] .layer-checkbox {
+  font-size: 12px;
+}
+
 [data-font-size="large"] .function-card,
-[data-font-size="large"] .layer-control,
 [data-font-size="large"] .stats-card {
   padding: 20px;
+}
+
+[data-font-size="large"] .layer-section {
+  padding: 12px 16px;
+}
+
+[data-font-size="large"] .layer-checkbox {
+  font-size: 15px;
 }
 
 [data-font-size="small"] .module-title {
