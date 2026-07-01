@@ -24,14 +24,26 @@ const i18n = {
     hintBottom: '鼠标左键拖拽：旋转视角 ｜ 滚轮：缩放 ｜ 右键拖拽：平移',
     height: '高度',
     area: '面积',
-    m2: 'm²'
+    m2: 'm²',
+    loading: '建筑白模：正在从服务器获取数据...',
+    loaded: '建筑白模：已加载 {count} 栋建筑',
+    loadedFromServer: '建筑白模：已加载 {count} 栋建筑（来自服务器）',
+    loadingFailed: '建筑白模：加载失败，请检查服务器连接',
+    fetching: '建筑白模：已获取 {loaded}/{total} 栋建筑',
+    drawingMode: '绘制模式：点击地图添加顶点，右键结束绘制，Ctrl+Z撤销'
   },
   'en': {
     legendTitle: 'Height Levels',
     hintBottom: 'Left drag: Rotate ｜ Scroll: Zoom ｜ Right drag: Pan',
     height: 'Height',
     area: 'Area',
-    m2: 'm²'
+    m2: 'm²',
+    loading: 'Building Model: Loading data from server...',
+    loaded: 'Building Model: {count} buildings loaded',
+    loadedFromServer: 'Building Model: {count} buildings loaded (from server)',
+    loadingFailed: 'Building Model: Load failed, please check server connection',
+    fetching: 'Building Model: {loaded}/{total} buildings fetched',
+    drawingMode: 'Drawing Mode: Click map to add points, Right-click to finish, Ctrl+Z to undo'
   }
 }
 
@@ -43,22 +55,43 @@ const NO_FLY_ZONE_API_URL = '/api/public/nofly-zones'
 const cesiumContainer = ref(null)
 const buildingLoadingText = ref('建筑白模：正在从服务器获取数据...')
 const buildingCount = ref(0)
-const showLegend = ref(true)
+const showLegend = ref(false)
 const buildingTotal = ref(0)
 
 let viewer = null
-let buildingDataSource = null
+let buildingDataSources = []
 let noFlyZoneDataSource = null
-let colorMode = 'height'
+let colorMode = 'uniform'
 let drawingHandler = null
 let drawnPolygon = null
 let drawingHistory = []
 let pointEntities = []
 
+let currentColorState = 'uniform'
+let colorUpdateTimer = null
+let filterBlinkTimer = null
+
+const HEIGHT_LEVELS = [
+  { min: 0, max: 5, color: Cesium.Color.fromCssColorString('rgba(65, 105, 225, 0.95)'), name: 'height_0_5' },
+  { min: 5, max: 10, color: Cesium.Color.fromCssColorString('rgba(135, 206, 250, 0.95)'), name: 'height_5_10' },
+  { min: 10, max: 15, color: Cesium.Color.fromCssColorString('rgba(0, 206, 209, 0.95)'), name: 'height_10_15' },
+  { min: 15, max: 20, color: Cesium.Color.fromCssColorString('rgba(50, 205, 50, 0.95)'), name: 'height_15_20' },
+  { min: 20, max: 25, color: Cesium.Color.fromCssColorString('rgba(255, 215, 0, 0.95)'), name: 'height_20_25' },
+  { min: 25, max: 30, color: Cesium.Color.fromCssColorString('rgba(255, 165, 0, 0.95)'), name: 'height_25_30' },
+  { min: 30, max: 500, color: Cesium.Color.fromCssColorString('rgba(255, 0, 0, 0.95)'), name: 'height_30_plus' }
+]
+
 function getEntityHeight(entity) {
   if (!entity.polygon) return 10
   const p = entity.properties
   if (!p) return 10
+  
+  if (p.real_height !== undefined && p.real_height !== null) {
+    const h = Number(p.real_height)
+    if (!isNaN(h) && h > 1) {
+      return h
+    }
+  }
   
   if (heightField) {
     const h = Number(p[heightField])
@@ -97,16 +130,27 @@ function getHeightColor(height) {
   }
 }
 
-async function loadBuildingWhiteModel() {
+async function loadBuildingWhiteModel(params = {}) {
   try {
-    buildingLoadingText.value = '建筑白模：正在从服务器获取数据...'
+    buildingLoadingText.value = t.value.loading
     
+    const { minHeight = 0, maxHeight = 500, minArea = 0, maxArea = 100000 } = params
     const pageSize = 2000
     let currentPage = 1
     let totalLoaded = 0
-    let allFeatures = []
     
-    let response = await fetch(`${BUILDING_API_URL}?page=${currentPage}&pageSize=${pageSize}`)
+    const groupedFeatures = HEIGHT_LEVELS.map(() => [])
+    
+    const urlParams = new URLSearchParams({
+      minHeight,
+      maxHeight,
+      minArea,
+      maxArea,
+      page: currentPage,
+      pageSize
+    })
+    
+    let response = await fetch(`${BUILDING_API_URL}?${urlParams.toString()}`)
     let result = await response.json()
 
     if (result.code !== 0) {
@@ -115,37 +159,30 @@ async function loadBuildingWhiteModel() {
 
     buildingTotal.value = result.total
     
-    buildingDataSource = new Cesium.CustomDataSource('buildings')
-    await viewer.dataSources.add(buildingDataSource)
+    clearBuildingDataSources()
+    buildingDataSources = []
     
     while (currentPage <= Math.ceil(result.total / pageSize)) {
-      const tempDataSource = await Cesium.GeoJsonDataSource.load(result.data)
+      const features = result.data?.features || []
       
-      for (const entity of tempDataSource.entities.values) {
-        if (!entity.polygon) continue
-
-        const height = getEntityHeight(entity)
-        const color = colorMode === 'height' ? getHeightColor(height) : Cesium.Color.fromCssColorString('rgba(200, 200, 200, 0.75)')
-
-        entity.polygon.height = 0
-        entity.polygon.extrudedHeight = height
-        entity.polygon.closeTop = true
-        entity.polygon.closeBottom = true
-        entity.polygon.outline = false
-        entity.polygon.material = color
-
-        buildingDataSource.entities.add(entity)
-        totalLoaded++
+      for (const feature of features) {
+        const height = parseFloat(feature.properties?.height) || 10
+        const levelIndex = HEIGHT_LEVELS.findIndex(l => height >= l.min && height < l.max)
+        if (levelIndex >= 0) {
+          groupedFeatures[levelIndex].push(feature)
+        }
       }
       
+      totalLoaded += features.length
       buildingCount.value = totalLoaded
-      buildingLoadingText.value = `建筑白模：已加载 ${totalLoaded}/${result.total} 栋建筑`
+      buildingLoadingText.value = t.value.fetching.replace('{loaded}', totalLoaded).replace('{total}', result.total)
       
       await new Promise(resolve => setTimeout(resolve, 50))
       
       currentPage++
       if (currentPage <= Math.ceil(result.total / pageSize)) {
-        response = await fetch(`${BUILDING_API_URL}?page=${currentPage}&pageSize=${pageSize}`)
+        urlParams.set('page', currentPage)
+        response = await fetch(`${BUILDING_API_URL}?${urlParams.toString()}`)
         result = await response.json()
         
         if (result.code !== 0) {
@@ -154,13 +191,55 @@ async function loadBuildingWhiteModel() {
       }
     }
     
-    buildingLoadingText.value = `建筑白模：已加载 ${totalLoaded} 栋建筑（来自服务器）`
+    for (let i = 0; i < HEIGHT_LEVELS.length; i++) {
+      const features = groupedFeatures[i]
+      if (features.length === 0) continue
+      
+      const level = HEIGHT_LEVELS[i]
+      
+      const ds = new Cesium.CustomDataSource(level.name)
+      viewer.dataSources.add(ds)
+      buildingDataSources.push(ds)
+      
+      const geoJsonData = {
+        type: 'FeatureCollection',
+        features: features
+      }
+      
+      const tempDataSource = await Cesium.GeoJsonDataSource.load(geoJsonData)
+      
+      const color = colorMode === 'height' ? level.color : Cesium.Color.fromCssColorString('rgba(200, 200, 200, 1.0)')
+      
+      for (const entity of tempDataSource.entities.values) {
+        if (!entity.polygon) continue
+        
+        const realHeight = parseFloat(entity.properties?.height) || 10
+        const displayHeight = realHeight * 12
+        
+        entity.polygon.height = 0
+        entity.polygon.extrudedHeight = displayHeight
+        entity.polygon.closeTop = true
+        entity.polygon.closeBottom = true
+        entity.polygon.outline = false
+        entity.polygon.material = color
+        
+        if (!entity.properties._propertyNames.includes('real_height')) {
+          entity.properties.real_height = realHeight
+        }
+        
+        ds.entities.add(entity)
+      }
+    }
+    
+    buildingLoadingText.value = t.value.loadedFromServer.replace('{count}', totalLoaded)
 
     try {
-      await viewer.flyTo(buildingDataSource, {
-        duration: 2,
-        maximumHeight: 18000
-      })
+      if (buildingDataSources.length > 0) {
+        await viewer.flyTo(buildingDataSources[0], {
+          duration: 2,
+          maximumHeight: 18000
+        })
+      }
     } catch (e) {
       console.warn('飞向建筑数据范围失败，保留默认视角', e)
     }
@@ -169,12 +248,27 @@ async function loadBuildingWhiteModel() {
     detectPropertyFields()
   } catch (error) {
     console.error('加载建筑白模失败：', error)
-    buildingLoadingText.value = `建筑白模：加载失败，请检查服务器连接`
+    buildingLoadingText.value = t.value.loadingFailed
   }
 }
 
+function clearBuildingDataSources() {
+  for (const ds of buildingDataSources) {
+    viewer.dataSources.remove(ds)
+  }
+  buildingDataSources = []
+  originalColors.clear()
+  filteredBuildings = []
+  collisionBuildings = []
+}
+
+
+
 async function loadNoFlyZone() {
-  if (noFlyZoneDataSource) return
+  if (noFlyZoneDataSource) {
+    viewer.dataSources.add(noFlyZoneDataSource)
+    return
+  }
   try {
     const response = await fetch(NO_FLY_ZONE_API_URL)
     const result = await response.json()
@@ -202,35 +296,183 @@ async function loadNoFlyZone() {
   }
 }
 
+function applyColors(state, params = {}) {
+  if (buildingDataSources.length === 0) return
+  
+  currentColorState = state
+  
+  if (colorUpdateTimer) {
+    cancelAnimationFrame(colorUpdateTimer)
+    colorUpdateTimer = null
+  }
+  
+  if (filterBlinkTimer) {
+    clearInterval(filterBlinkTimer)
+    filterBlinkTimer = null
+  }
+  
+  switch (state) {
+    case 'height':
+      setColorLayerByLevel(true)
+      break
+    case 'uniform':
+      setColorLayerByLevel(false)
+      break
+    case 'filter':
+      applyFilterColors(params)
+      break
+    case 'collision':
+      applyCollisionColors(params)
+      break
+    default:
+      setColorLayerByLevel(false)
+  }
+}
+
+function applyFilterColors(params) {
+  const { minHeight, maxHeight, minArea } = params
+  const highlightColor = Cesium.Color.fromCssColorString('rgba(255, 235, 59, 0.8)')
+  const highlightOutline = Cesium.Color.fromCssColorString('#FFEB3B')
+  
+  const allEntities = []
+  for (const ds of buildingDataSources) {
+    for (const entity of ds.entities.values) {
+      if (entity.polygon) {
+        allEntities.push(entity)
+      }
+    }
+  }
+  
+  const total = allEntities.length
+  let index = 0
+  
+  function updateBatch() {
+    const startTime = performance.now()
+    
+    while (index < total && (performance.now() - startTime) < 10) {
+      const entity = allEntities[index]
+      
+      const p = entity.properties
+      let height = 10
+      let area = 0
+      
+      if (p) {
+        if (heightField) {
+          height = Number(p[heightField])
+          if (isNaN(height) || height <= 1) height = 10
+        }
+        if (areaField) {
+          area = Number(p[areaField])
+          if (isNaN(area)) area = 0
+        }
+      }
+      
+      if (height >= minHeight && height <= maxHeight && area >= minArea) {
+        if (!originalColors.has(entity)) {
+          originalColors.set(entity, entity.polygon.material)
+        }
+        
+        entity.polygon.material = highlightColor
+        entity.polygon.outline = true
+        entity.polygon.outlineColor = highlightOutline
+        entity.polygon.outlineWidth = 2
+      }
+      
+      index++
+    }
+    
+    if (index < total) {
+      requestAnimationFrame(updateBatch)
+    } else {
+      startFilterBlinking(filteredBuildings)
+      console.log('筛选高亮完成，共高亮', filteredBuildings.length, '个建筑')
+    }
+  }
+  
+  updateBatch()
+}
+
+function applyCollisionColors(params) {
+  const { collisionMinHeight } = params
+  const collisionColor = Cesium.Color.fromCssColorString('rgba(255, 0, 0, 0.9)')
+  const collisionOutline = Cesium.Color.fromCssColorString('#FF0000')
+  
+  for (const ds of buildingDataSources) {
+    for (const entity of ds.entities.values) {
+      if (!entity.polygon) continue
+      
+      const height = getEntityHeight(entity)
+      
+      if (height >= collisionMinHeight) {
+        if (!originalColors.has(entity)) {
+          originalColors.set(entity, entity.polygon.material)
+        }
+        
+        entity.polygon.material = collisionColor
+        entity.polygon.outline = true
+        entity.polygon.outlineColor = collisionOutline
+        entity.polygon.outlineWidth = 3
+      }
+    }
+  }
+  
+  console.log('碰撞检测高亮完成')
+}
+
+function startFilterBlinking(entities) {
+  if (filterBlinkTimer) {
+    clearInterval(filterBlinkTimer)
+  }
+  
+  let isBright = true
+  filterBlinkTimer = setInterval(() => {
+    isBright = !isBright
+    const color = isBright 
+      ? Cesium.Color.fromCssColorString('rgba(255, 235, 59, 0.9)')
+      : Cesium.Color.fromCssColorString('rgba(255, 235, 59, 0.4)')
+    
+    for (const entity of entities) {
+      if (entity.polygon) {
+        entity.polygon.material = color
+      }
+    }
+  }, 500)
+}
+
+let lastFilterParams = {}
+
 function setColorLayer(enabled) {
   colorMode = enabled ? 'height' : 'uniform'
   showLegend.value = enabled
   
-  if (!buildingDataSource) return
+  applyColors(enabled ? 'height' : 'uniform')
+}
+
+function setColorLayerByLevel(enabled) {
+  colorMode = enabled ? 'height' : 'uniform'
+  showLegend.value = enabled
   
-  const entities = buildingDataSource.entities.values
-  const batchSize = 500
-  let index = 0
+  const targetColorMode = enabled ? 'height' : 'uniform'
   
-  function updateBatch() {
-    const end = Math.min(index + batchSize, entities.length)
-    for (; index < end; index++) {
-      const entity = entities[index]
-      if (entity.polygon) {
-        const height = getEntityHeight(entity)
-        const color = enabled ? getHeightColor(height) : Cesium.Color.fromCssColorString('rgba(200, 200, 200, 0.3)')
-        entity.polygon.material = color
-      }
+  for (let i = 0; i < buildingDataSources.length; i++) {
+    const ds = buildingDataSources[i]
+    const levelIndex = HEIGHT_LEVELS.findIndex(l => l.name === ds.name)
+    
+    let targetColor
+    if (targetColorMode === 'height' && levelIndex >= 0) {
+      targetColor = HEIGHT_LEVELS[levelIndex].color
+    } else {
+      targetColor = Cesium.Color.fromCssColorString('rgba(200, 200, 200, 1.0)')
     }
     
-    if (index < entities.length) {
-      requestAnimationFrame(updateBatch)
-    } else {
-      console.log('分层设色切换完成，共更新', entities.length, '个实体')
+    for (const entity of ds.entities.values) {
+      if (entity.polygon) {
+        entity.polygon.material = targetColor
+      }
     }
   }
   
-  requestAnimationFrame(updateBatch)
+  console.log('分层设色切换完成，共更新', buildingDataSources.length, '个DataSource')
 }
 
 function setNoFlyZoneLayer(enabled) {
@@ -314,10 +556,10 @@ function startDrawing() {
       drawnPolygon = viewer.entities.add({
         polygon: {
           hierarchy: new Cesium.PolygonHierarchy(positions),
-          material: Cesium.Color.fromCssColorString('rgba(52, 211, 153, 0.4)'),
+          material: Cesium.Color.fromCssColorString('rgba(0, 255, 255, 0.5)'),
           outline: true,
-          outlineColor: Cesium.Color.fromCssColorString('#34d399'),
-          outlineWidth: 2
+          outlineColor: Cesium.Color.fromCssColorString('#0066CC'),
+          outlineWidth: 3
         }
       })
       
@@ -338,7 +580,7 @@ function startDrawing() {
   
   document.addEventListener('keydown', handleKeyDown)
   
-  buildingLoadingText.value = '绘制模式：点击地图添加顶点，右键结束绘制，Ctrl+Z撤销'
+  buildingLoadingText.value = t.value.drawingMode
 }
 
 function handleKeyDown(e) {
@@ -406,7 +648,7 @@ function clearDrawing() {
   drawingHistory = []
   drawnPolygonPositions = []
   document.removeEventListener('keydown', handleKeyDown)
-  buildingLoadingText.value = '建筑白模：已加载 ' + buildingCount.value + ' 栋建筑'
+  buildingLoadingText.value = t.value.loaded.replace('{count}', buildingCount.value)
 }
 
 let originalColors = new Map()
@@ -424,33 +666,32 @@ let selectedNoFlyZoneLabel = null
 function detectPropertyFields() {
   if (heightField && areaField) return
   
-  const entities = buildingDataSource.entities.values
-  for (const entity of entities) {
-    if (!entity.polygon || !entity.properties) continue
-    
-    const p = entity.properties
-    
-    if (!heightField) {
-      const hFields = ['height', 'building_height', 'Height', 'HEIGHT', 'buildingheight']
-      for (const f of hFields) {
-        if (p[f] !== undefined && p[f] !== null) {
-          heightField = f
-          break
+  for (const ds of buildingDataSources) {
+    for (const entity of ds.entities.values) {
+      const p = entity.properties || {}
+      
+      if (!heightField) {
+        const hFields = ['height', 'building_height', 'Height', 'HEIGHT', 'buildingheight']
+        for (const f of hFields) {
+          if (p[f] !== undefined && p[f] !== null) {
+            heightField = f
+            break
+          }
         }
       }
-    }
-    
-    if (!areaField) {
-      const aFields = ['area', 'area_m2', 'AREA', 'Area', 'building_area', 'area_m']
-      for (const f of aFields) {
-        if (p[f] !== undefined && p[f] !== null) {
-          areaField = f
-          break
+      
+      if (!areaField) {
+        const aFields = ['area', 'area_m2', 'AREA', 'Area', 'building_area', 'area_m']
+        for (const f of aFields) {
+          if (p[f] !== undefined && p[f] !== null) {
+            areaField = f
+            break
+          }
         }
       }
+      
+      if (heightField && areaField) return
     }
-    
-    if (heightField && areaField) break
   }
 }
 
@@ -458,6 +699,11 @@ function getEntityArea(entity) {
   if (!entity.polygon) return 0
   const p = entity.properties
   if (!p) return 0
+  
+  if (p.area !== undefined && p.area !== null) {
+    const num = Number(p.area)
+    return isNaN(num) ? 0 : num
+  }
   
   if (areaField) {
     const val = p[areaField]
@@ -467,7 +713,7 @@ function getEntityArea(entity) {
     }
   }
   
-  const areaFields = ['area', 'area_m2', 'AREA', 'Area', 'building_area', 'area_m']
+  const areaFields = ['area_m2', 'AREA', 'Area', 'building_area', 'area_m']
   for (const field of areaFields) {
     const val = p[field]
     if (val !== undefined && val !== null) {
@@ -481,44 +727,20 @@ function getEntityArea(entity) {
 let filterCallback = null
 
 function filterBuildings(minHeight, maxHeight, minArea, maxArea) {
-  if (!buildingDataSource) {
+  if (buildingDataSources.length === 0) {
     if (filterCallback) filterCallback({ count: 0, data: [] })
     return { count: 0, data: [] }
   }
   
   detectPropertyFields()
   
+  lastFilterParams = { minHeight, maxHeight, minArea }
   filteredBuildings = []
-  
-  const highlightColor = Cesium.Color.fromCssColorString('rgba(0, 255, 128, 0.8)')
-  const highlightOutline = Cesium.Color.fromCssColorString('#00FF80')
-  const dimColor = Cesium.Color.fromCssColorString('rgba(200, 200, 200, 0.3)')
-  
-  const entities = buildingDataSource.entities.values
-  const entityArray = []
-  
-  for (const entity of entities) {
-    if (entity.polygon) {
-      entityArray.push(entity)
-    }
-  }
-  
-  const total = entityArray.length
-  let index = 0
   const resultData = []
-  const highlightList = []
-  const dimList = []
   
-  function processBatch() {
-    const batchSize = 5000
-    const end = Math.min(index + batchSize, total)
-    
-    for (; index < end; index++) {
-      const entity = entityArray[index]
-      
-      if (!originalColors.has(entity)) {
-        originalColors.set(entity, entity.polygon.material)
-      }
+  for (const ds of buildingDataSources) {
+    for (const entity of ds.entities.values) {
+      if (!entity.polygon) continue
       
       const p = entity.properties
       let height = 10
@@ -537,67 +759,22 @@ function filterBuildings(minHeight, maxHeight, minArea, maxArea) {
       
       if (height >= minHeight && height <= maxHeight && area >= minArea) {
         filteredBuildings.push(entity)
-        highlightList.push(entity)
         resultData.push({
           height: height,
           area: area,
           id: entity.id
         })
-      } else {
-        dimList.push(entity)
       }
-    }
-    
-    if (index < total) {
-      setTimeout(processBatch, 0)
-    } else {
-      if (filterCallback) {
-        filterCallback({ count: resultData.length, data: resultData })
-      }
-      
-      function applyColors() {
-        const colorBatchSize = 2000
-        let colorIndex = 0
-        
-        function applyColorBatch() {
-          const colorEnd = Math.min(colorIndex + colorBatchSize, highlightList.length)
-          for (; colorIndex < colorEnd; colorIndex++) {
-            const e = highlightList[colorIndex]
-            e.polygon.material = highlightColor
-            e.polygon.outline = true
-            e.polygon.outlineColor = highlightOutline
-            e.polygon.outlineWidth = 2
-          }
-          
-          if (colorIndex < highlightList.length) {
-            requestAnimationFrame(applyColorBatch)
-          } else {
-            let dimIndex = 0
-            function applyDimBatch() {
-              const dimEnd = Math.min(dimIndex + colorBatchSize, dimList.length)
-              for (; dimIndex < dimEnd; dimIndex++) {
-                const e = dimList[dimIndex]
-                e.polygon.material = dimColor
-                e.polygon.outline = false
-              }
-              if (dimIndex < dimList.length) {
-                requestAnimationFrame(applyDimBatch)
-              }
-            }
-            applyDimBatch()
-          }
-        }
-        
-        applyColorBatch()
-      }
-      
-      setTimeout(applyColors, 0)
     }
   }
   
-  processBatch()
+  applyColors('filter', { minHeight, maxHeight, minArea })
   
-  return { count: 0, data: [] }
+  if (filterCallback) {
+    filterCallback({ count: resultData.length, data: resultData })
+  }
+  
+  return { count: resultData.length, data: resultData }
 }
 
 function pointInPolygon(point, polygonPoints) {
@@ -682,7 +859,7 @@ function isInNoFlyZone() {
 }
 
 function checkRouteCollision(minHeight, maxHeight) {
-  if (!buildingDataSource || drawnPolygonPositions.length < 3) {
+  if (buildingDataSources.length === 0 || drawnPolygonPositions.length < 3) {
     if (collisionCallback) collisionCallback({ compliant: true, count: 0, details: [] })
     return { compliant: true, count: 0, details: [] }
   }
@@ -699,29 +876,13 @@ function checkRouteCollision(minHeight, maxHeight) {
     y: p.y
   }))
   
-  const boundingSphere = Cesium.BoundingSphere.fromPoints(drawnPolygonPositions)
-  
-  const entities = buildingDataSource.entities.values
-  const entityArray = []
-  
-  for (const entity of entities) {
-    if (entity.polygon) {
-      entityArray.push(entity)
-    }
-  }
-  
-  const total = entityArray.length
-  let index = 0
   let collisionCount = 0
   const collisionDetails = []
   const collisionEntities = []
   
-  function processBatch() {
-    const batchSize = 5000
-    const end = Math.min(index + batchSize, total)
-    
-    for (; index < end; index++) {
-      const entity = entityArray[index]
+  for (const ds of buildingDataSources) {
+    for (const entity of ds.entities.values) {
+      if (!entity.polygon || !entity.show) continue
       
       const polygon = entity.polygon
       const hierarchy = polygon.hierarchy.getValue()
@@ -744,62 +905,59 @@ function checkRouteCollision(minHeight, maxHeight) {
         }
       }
     }
-    
-    if (index < total) {
-      setTimeout(processBatch, 0)
-    } else {
-      const collisionColor = Cesium.Color.fromCssColorString('rgba(255, 0, 0, 0.9)')
-      const collisionOutline = Cesium.Color.fromCssColorString('#FF0000')
-      
-      collisionBuildings = []
-      
-      collisionEntities.forEach(entity => {
-        if (!originalColors.has(entity)) {
-          originalColors.set(entity, entity.polygon.material)
-        }
-        
-        entity.polygon.material = collisionColor
-        entity.polygon.outline = true
-        entity.polygon.outlineColor = collisionOutline
-        entity.polygon.outlineWidth = 3
-        
-        collisionBuildings.push(entity)
-      })
-      
-      const result = {
-        compliant: collisionCount === 0,
-        count: collisionCount,
-        details: collisionDetails
-      }
-      
-      if (collisionCallback) {
-        collisionCallback(result)
-      }
-    }
   }
   
-  processBatch()
+  const collisionColor = Cesium.Color.fromCssColorString('rgba(255, 0, 0, 0.9)')
+  const collisionOutline = Cesium.Color.fromCssColorString('#FF0000')
   
-  return { compliant: true, count: 0, details: [] }
+  collisionBuildings = []
+  
+  collisionEntities.forEach(entity => {
+    if (!originalColors.has(entity)) {
+      originalColors.set(entity, entity.polygon.material)
+    }
+    
+    entity.polygon.material = collisionColor
+    entity.polygon.outline = true
+    entity.polygon.outlineColor = collisionOutline
+    entity.polygon.outlineWidth = 3
+    
+    collisionBuildings.push(entity)
+  })
+  
+  const result = {
+    compliant: collisionCount === 0,
+    count: collisionCount,
+    details: collisionDetails
+  }
+  
+  if (collisionCallback) {
+    collisionCallback(result)
+  }
+  
+  return result
 }
 
 function resetBuildingColors() {
-  if (!buildingDataSource) return
-  
-  const entities = buildingDataSource.entities.values
-  for (const entity of entities) {
-    if (!entity.polygon) continue
-    
-    if (originalColors.has(entity)) {
-      entity.polygon.material = originalColors.get(entity)
-      entity.polygon.outline = false
-    }
+  if (filterBlinkTimer) {
+    clearInterval(filterBlinkTimer)
+    filterBlinkTimer = null
   }
   
   filteredBuildings = []
   collisionBuildings = []
   
+  originalColors.forEach((color, entity) => {
+    if (entity.polygon) {
+      entity.polygon.material = color
+      entity.polygon.outline = false
+      entity.polygon.outlineWidth = 1
+    }
+  })
+  originalColors.clear()
+  
   clearBuildingSelection()
+  console.log('清除筛选完成')
 }
 
 function clearBuildingSelection() {
@@ -853,7 +1011,7 @@ function setupBuildingClickHandler() {
       selectedNoFlyZone.polygon.outlineColor = highlightOutline
       selectedNoFlyZone.polygon.outlineWidth = 4
       
-      const name = entity.properties?.zone_name?.getValue() || '未命名禁飞区'
+      const name = entity.properties?.zone_name?.getValue() || (props.currentLanguage === 'en' ? 'Unnamed No-Fly Zone' : '未命名禁飞区')
       const area = getEntityArea(entity)
       const note = entity.properties?.note?.getValue() || ''
       
@@ -875,7 +1033,9 @@ function setupBuildingClickHandler() {
       }
       
       const wrappedName = wrapText(name, 12)
-      const wrappedNote = note ? `标注:\n${wrapText(note, 15)}` : ''
+      const noteLabel = props.currentLanguage === 'en' ? 'Note:' : '标注:'
+      const areaLabel = props.currentLanguage === 'en' ? 'Area:' : '面积:'
+      const wrappedNote = note ? `${noteLabel}\n${wrapText(note, 15)}` : ''
       
       const hierarchy = entity.polygon.hierarchy.getValue()
       const center = getPolygonCentroid(hierarchy.positions)
@@ -886,7 +1046,7 @@ function setupBuildingClickHandler() {
       selectedNoFlyZoneLabel = viewer.entities.add({
         position: Cesium.Cartesian3.fromDegrees(longitude, latitude, 60),
         label: {
-          text: `${wrappedName}\n面积: ${area.toFixed(1)}m²${wrappedNote ? `\n${wrappedNote}` : ''}`,
+          text: `${wrappedName}\n${areaLabel} ${area.toFixed(1)}m²${wrappedNote ? `\n${wrappedNote}` : ''}`,
           font: '10pt sans-serif',
           fillColor: Cesium.Color.WHITE,
           outlineColor: Cesium.Color.BLACK,
@@ -904,7 +1064,14 @@ function setupBuildingClickHandler() {
       return
     }
     
-    if (!buildingDataSource || !buildingDataSource.entities.contains(entity)) {
+    let isBuilding = false
+    for (const ds of buildingDataSources) {
+      if (ds.entities.contains(entity)) {
+        isBuilding = true
+        break
+      }
+    }
+    if (!isBuilding) {
       return
     }
     
@@ -942,7 +1109,8 @@ function setupBuildingClickHandler() {
         horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
         pixelOffset: new Cesium.Cartesian2(0, -40),
         showBackground: true,
-        backgroundColor: Cesium.Color.fromCssColorString('rgba(0, 0, 0, 0.7)')
+        backgroundColor: Cesium.Color.fromCssColorString('rgba(0, 0, 0, 0.7)'),
+        disableDepthTestDistance: Number.POSITIVE_INFINITY
       }
     })
     
@@ -969,15 +1137,29 @@ function initCesiumViewer() {
     infoBox: false,
     selectionIndicator: false,
     shouldAnimate: true,
-    sceneMode: Cesium.SceneMode.SCENE3D,
-    baseLayer: new Cesium.ImageryLayer(
-      new Cesium.OpenStreetMapImageryProvider({
-        url: 'https://tile.openstreetmap.org/'
-      })
-    )
+    sceneMode: Cesium.SceneMode.SCENE3D
   })
 
   viewer.cesiumWidget.creditContainer.style.display = 'none'
+
+  const osmProvider = new Cesium.OpenStreetMapImageryProvider({
+    url: 'https://tile.openstreetmap.org/'
+  })
+  
+  viewer.scene.imageryLayers.removeAll()
+  const osmLayer = viewer.scene.imageryLayers.addImageryProvider(osmProvider)
+  
+  const satelliteProvider = new Cesium.UrlTemplateImageryProvider({
+    url: 'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    maximumLevel: 19,
+    enablePickFeatures: false
+  })
+  
+  const satelliteLayer = viewer.scene.imageryLayers.addImageryProvider(satelliteProvider)
+  satelliteLayer.show = false
+  
+  window.osmLayer = osmLayer
+  window.satelliteLayer = satelliteLayer
 
   viewer.camera.setView({
     destination: Cesium.Cartesian3.fromDegrees(-118.2437, 34.0522, 18000),
@@ -996,12 +1178,14 @@ function initCesiumViewer() {
 
   window.cesiumViewer = viewer
   window.setColorLayer = setColorLayer
+  window.setColorLayerByLevel = setColorLayerByLevel
   window.setNoFlyZoneLayer = setNoFlyZoneLayer
   window.startDrawing = startDrawing
   window.clearDrawing = clearDrawing
   window.filterBuildings = filterBuildings
   window.resetBuildingColors = resetBuildingColors
   window.checkRouteCollision = checkRouteCollision
+  window.isDrawingInNoFlyZone = isInNoFlyZone
   Object.defineProperty(window, 'collisionCallback', {
     get: () => collisionCallback,
     set: (val) => { collisionCallback = val }
@@ -1011,6 +1195,12 @@ function initCesiumViewer() {
     set: (val) => { filterCallback = val }
   })
 }
+
+watch(() => props.currentLanguage, () => {
+  if (buildingCount.value > 0) {
+    buildingLoadingText.value = t.value.loaded.replace('{count}', buildingCount.value)
+  }
+})
 
 onMounted(() => {
   initCesiumViewer()
@@ -1069,8 +1259,10 @@ defineExpose({
       </div>
     </div>
 
-    <div class="hint" :class="currentFontSize">{{ buildingLoadingText }}</div>
-    <div class="hint-bottom" :class="currentFontSize">{{ t.hintBottom }}</div>
+    <div class="hint-container" :class="currentFontSize">
+      <div class="hint">{{ buildingLoadingText }}</div>
+      <div class="hint-bottom">{{ t.hintBottom }}</div>
+    </div>
   </div>
 </template>
 
@@ -1125,26 +1317,30 @@ defineExpose({
   border: 1px solid rgba(255, 255, 255, 0.3);
 }
 
-.hint {
-  position: absolute;
-  bottom: 40px;
-  left: 20px;
-  color: #ffffff;
-  font-size: 14px;
-  text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.7);
-  z-index: 10;
-  pointer-events: none;
-}
-
-.hint-bottom {
+.hint-container {
   position: absolute;
   bottom: 20px;
   left: 20px;
-  color: #ffffff;
-  font-size: 14px;
-  text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.7);
-  z-index: 10;
+  z-index: 100;
   pointer-events: none;
+  background: rgba(255, 255, 255, 0.9);
+  padding: 10px 14px;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.hint {
+  color: #333333;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.hint-bottom {
+  color: #333333;
+  font-size: 14px;
+  font-weight: 500;
 }
 
 .legend.small .legend-title,
@@ -1156,6 +1352,15 @@ defineExpose({
 .legend.small .legend-item {
   font-size: 11px;
   margin-bottom: 4px;
+}
+
+[data-theme="dark"] .hint-container {
+  background: rgba(0, 0, 0, 0.6);
+}
+
+[data-theme="dark"] .hint,
+[data-theme="dark"] .hint-bottom {
+  color: #ffffff;
 }
 
 .legend.large .legend-title,

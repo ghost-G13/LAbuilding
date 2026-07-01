@@ -36,7 +36,7 @@ const isDrawing = ref(false)
 const isCheckingCollision = ref(false)
 
 const noFlyZoneLayer = ref(false)
-const colorLayer = ref(true)
+const colorLayer = ref(false)
 
 const noFlyZoneArea = computed(() => `1,256.8 ${t.value.hectare}`)
 
@@ -265,6 +265,7 @@ const showSettings = ref(false)
 const currentLanguage = ref('zh-CN')
 const currentTheme = ref('light')
 const currentFontSize = ref('medium')
+const currentBasemap = ref('osm')
 
 const i18n = {
   'zh-CN': {
@@ -272,11 +273,11 @@ const i18n = {
     settings: '设置',
     login: '登录',
     logout: '退出登录',
-    takeoffAnalysis: '01 起降点分析',
-    flightHeight: '输入飞行高度(m)',
+    takeoffAnalysis: '01 低空选址筛选',
+    flightHeight: '输入建筑高度要求(m)：',
     minHeight: '最小值',
     maxHeight: '最大值',
-    area: '输入面积要求(m²)',
+    area: '输入建筑面积要求(m²)：',
     minArea: '最低面积',
     maxArea: '最大面积',
     inputComplete: '请输入以上相关信息！',
@@ -286,17 +287,19 @@ const i18n = {
     clearFilter: '清除筛选',
     filter: '筛选',
     exportResults: '导出结果',
-    collisionWarning: '02 航线碰撞预警',
+    collisionWarning: '02 飞行区域碰撞预警',
     drawRange: '绘制范围',
     drawing: '绘制中…',
     drawHint: '提示：点击按钮后在地图上绘制多边形区域',
-    collisionHeight: '飞行高度区间(m)',
+    collisionHeight: '飞行高度区间(m)：',
     checkCollision: '检测碰撞',
     compliant: '安全合规',
     warning: '存在碰撞风险',
     danger: '高度危险',
     noFlyZone: '禁飞区图层',
-    colorLayer: '分层设色图层',
+    colorLayer: '建筑高度分级着色',
+    osm: 'OSM底图',
+    satellite: '卫星底图',
     statsTitle: '统计信息',
     buildingCount: '建筑数量',
     noFlyZoneArea: '禁飞区面积',
@@ -392,11 +395,11 @@ const i18n = {
     settings: 'Settings',
     login: 'Login',
     logout: 'Logout',
-    takeoffAnalysis: '01 Takeoff Point Analysis',
-    flightHeight: 'Flight Height (m)',
+    takeoffAnalysis: '01 Low-altitude Site Selection',
+    flightHeight: 'Building Height Requirement (m):',
     minHeight: 'Min',
     maxHeight: 'Max',
-    area: 'Area Requirement (m²)',
+    area: 'Building Area Requirement (m²):',
     minArea: 'Min Area',
     maxArea: 'Max Area',
     inputComplete: 'Please enter all required information!',
@@ -406,17 +409,19 @@ const i18n = {
     clearFilter: 'Clear Filter',
     filter: 'Filter',
     exportResults: 'Export Results',
-    collisionWarning: '02 Route Collision Warning',
+    collisionWarning: '02 Flight Zone Collision Warning',
     drawRange: 'Draw Range',
     drawing: 'Drawing...',
     drawHint: 'Hint: Click and draw polygon on the map',
-    collisionHeight: 'Flight Height Range (m)',
+    collisionHeight: 'Flight Height Range (m):',
     checkCollision: 'Check Collision',
     compliant: 'Compliant',
     warning: 'Collision Risk',
     danger: 'Highly Dangerous',
     noFlyZone: 'No-Fly Zone Layer',
-    colorLayer: 'Color-coded Layer',
+    colorLayer: 'Building Height Color',
+    osm: 'OSM Map',
+    satellite: 'Satellite Map',
     statsTitle: 'Statistics',
     buildingCount: 'Building Count',
     noFlyZoneArea: 'No-Fly Zone Area',
@@ -540,6 +545,19 @@ const closeSettings = () => {
   showSettings.value = false
 }
 
+const toggleBasemap = () => {
+  currentBasemap.value = currentBasemap.value === 'osm' ? 'satellite' : 'osm'
+  if (window.osmLayer && window.satelliteLayer) {
+    if (currentBasemap.value === 'osm') {
+      window.osmLayer.show = true
+      window.satelliteLayer.show = false
+    } else {
+      window.osmLayer.show = false
+      window.satelliteLayer.show = true
+    }
+  }
+}
+
 const handleLoginClick = () => {
   if (!isLoggedIn.value) {
     showLoginModal.value = true
@@ -560,7 +578,7 @@ const applySettings = () => {
   closeSettings()
 }
 
-const filterTakeoffPoints = () => {
+const filterTakeoffPoints = async () => {
   if (!isInputComplete.value) return
   
   const minH = parseFloat(flightHeightMin.value)
@@ -568,15 +586,31 @@ const filterTakeoffPoints = () => {
   const minA = parseFloat(areaMin.value)
   const maxA = parseFloat(areaMax.value)
   
-  if (window.filterBuildings) {
-    hasFiltered.value = true
-    filteredCount.value = -1
+  hasFiltered.value = true
+  filteredCount.value = -1
+  filteredData.value = []
+  
+  try {
+    const response = await fetch(`/api/public/buildings?minHeight=${minH}&maxHeight=${maxH}&minArea=${minA}&maxArea=${maxA}&page=1&pageSize=1`)
+    const result = await response.json()
     
-    window.filterCallback = (result) => {
-      filteredCount.value = result.count
-      filteredData.value = result.data
+    if (result.code === 0) {
+      filteredCount.value = result.total
+      
+      if (window.filterBuildings) {
+        window.filterCallback = (callbackResult) => {
+          filteredData.value = callbackResult.data
+        }
+        const filterResult = window.filterBuildings(minH, maxH, minA, maxA)
+        filteredData.value = filterResult.data
+      }
+    } else {
+      console.error('筛选失败:', result.message)
+      filteredCount.value = 0
     }
-    window.filterBuildings(minH, maxH, minA, maxA)
+  } catch (error) {
+    console.error('筛选请求失败:', error)
+    filteredCount.value = 0
   }
 }
 
@@ -629,7 +663,11 @@ const clearDraw = () => {
 window.onDrawComplete = () => {
   isDrawn.value = true
   isDrawing.value = false
-  warningStatus.value = 'input_height'
+  if (window.isDrawingInNoFlyZone && window.isDrawingInNoFlyZone()) {
+    warningStatus.value = 'no_fly_zone'
+  } else {
+    warningStatus.value = 'input_height'
+  }
 }
 
 function checkCollision() {
@@ -653,8 +691,8 @@ function checkCollision() {
 }
 
 watch(colorLayer, (val) => {
-  if (window.setColorLayer) {
-    window.setColorLayer(val)
+  if (window.setColorLayerByLevel) {
+    window.setColorLayerByLevel(val)
   }
 })
 
@@ -669,8 +707,8 @@ const validateCollisionHeight = () => {
 }
 
 onMounted(() => {
-  if (window.setColorLayer) {
-    window.setColorLayer(colorLayer.value)
+  if (window.setColorLayerByLevel) {
+    window.setColorLayerByLevel(colorLayer.value)
   }
   if (window.setNoFlyZoneLayer) {
     window.setNoFlyZoneLayer(noFlyZoneLayer.value)
@@ -729,6 +767,14 @@ onMounted(() => {
             </svg>
             <span>{{ t.settings }}</span>
           </button>
+          <button class="nav-btn" @click="toggleBasemap">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"></polygon>
+              <line x1="8" y1="2" x2="8" y2="18"></line>
+              <line x1="16" y1="6" x2="16" y2="22"></line>
+            </svg>
+            <span>{{ currentBasemap === 'osm' ? t.osm : t.satellite }}</span>
+          </button>
           <div class="user-menu-container">
             <button class="nav-btn" @click="handleLoginClick">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -752,6 +798,21 @@ onMounted(() => {
     </div>
     
     <div class="side-panel" @mouseenter="handlePanelEnter" @mouseleave="handlePanelLeave" @wheel="handlePanelScroll">
+      <div class="layer-control">
+        <div class="layer-section orange-bg">
+          <label class="layer-checkbox">
+            <input type="checkbox" v-model="noFlyZoneLayer">
+            <span>{{ t.noFlyZone }}</span>
+          </label>
+        </div>
+        <div class="layer-section blue-bg">
+          <label class="layer-checkbox">
+            <input type="checkbox" v-model="colorLayer">
+            <span>{{ t.colorLayer }}</span>
+          </label>
+        </div>
+      </div>
+      
       <div class="function-card">
         <h2 class="module-title">{{ t.takeoffAnalysis }}</h2>
         
@@ -820,21 +881,6 @@ onMounted(() => {
             <button class="action-btn small" @click="drawRange">{{ t.drawRange }}</button>
             <button class="action-btn small" @click="clearDraw">{{ t.clearFilter }}</button>
           </div>
-        </div>
-      </div>
-      
-      <div class="layer-control">
-        <div class="layer-section orange-bg">
-          <label class="layer-checkbox">
-            <input type="checkbox" v-model="noFlyZoneLayer">
-            <span>{{ t.noFlyZone }}</span>
-          </label>
-        </div>
-        <div class="layer-section blue-bg">
-          <label class="layer-checkbox">
-            <input type="checkbox" v-model="colorLayer">
-            <span>{{ t.colorLayer }}</span>
-          </label>
         </div>
       </div>
       
@@ -1474,6 +1520,7 @@ html, body, #app {
   display: block;
   font-size: 13px;
   color: #F27C22;
+  font-weight: bold;
   margin-bottom: 6px;
 }
 
@@ -2519,35 +2566,35 @@ html, body, #app {
 }
 
 [data-theme="dark"] .input-box {
-  background-color: #333333;
-  border-color: #444444;
+  background-color: #6b6b6b;
+  border-color: #888888;
   color: #ffffff;
 }
 
 [data-theme="dark"] .input-box::placeholder {
-  color: #666666;
+  color: #b0b0b0;
 }
 
 [data-theme="dark"] .action-btn {
-  background-color: #333333;
-  color: #e0e0e0;
-  border-color: #444444;
+  background-color: #4a4a4a;
+  color: #ffffff;
+  border-color: #666666;
 }
 
 [data-theme="dark"] .action-btn:hover {
-  background-color: #444444;
+  background-color: #5a5a5a;
 }
 
 [data-theme="dark"] .action-btn:disabled {
-  background-color: #2a2a2a;
+  background-color: #3a3a3a;
   color: #666666;
-  border-color: #333333;
+  border-color: #444444;
 }
 
 [data-theme="dark"] .draw-btn {
-  background-color: #b8860b;
+  background-color: #f0d76e;
   color: #1a1a1a;
-  border-color: #d4a574;
+  border-color: #f5e6a3;
 }
 
 [data-theme="dark"] .result-text {
@@ -2575,10 +2622,14 @@ html, body, #app {
 }
 
 [data-theme="dark"] .stats-item {
-  color: #cccccc;
+  color: #ffffff;
 }
 
 [data-theme="dark"] .stats-value {
+  color: #ffffff;
+}
+
+[data-theme="dark"] .stats-label {
   color: #ffffff;
 }
 
@@ -2734,9 +2785,21 @@ html, body, #app {
   background-color: rgba(255, 68, 68, 0.15);
 }
 
+[data-theme="dark"] .hint-container {
+  background: rgba(0, 0, 0, 0.6);
+}
+
 [data-theme="dark"] .hint,
 [data-theme="dark"] .hint-bottom {
-  color: #cccccc;
+  color: #ffffff;
+}
+
+[data-theme="dark"] .warning-status .status-text {
+  color: #ffffff;
+}
+
+[data-theme="dark"] .result-text {
+  color: #ffffff;
 }
 
 .lang-en .zh-text {
