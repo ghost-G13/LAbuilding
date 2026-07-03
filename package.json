@@ -1,0 +1,27 @@
+{
+  "name": "la-building",
+  "version": "1.0.0",
+  "description": "LAbuilding - Vercel deployment",
+  "main": "api/[[...path]].js",
+  "scripts": {
+    "dev": "cd frontend && npm run dev",
+    "start": "node backend/server.js",
+    "build": "cd frontend && npm install && npm run build"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@vercel/kv": "^1.0.1",
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
+    "nodemailer": "^9.0.2",
+    "pg": "^8.22.0",
+    "pg-hstore": "^2.3.4",
+    "svg-captcha": "^1.4.0"
+  }
+}

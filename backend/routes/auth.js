@@ -221,22 +221,24 @@ router.post("/login", async (req, res) => {
     console.log("[登录检查] storedCaptcha:", storedCaptcha, "captcha_code:", captcha_code.toLowerCase());
 
     if (!storedCaptcha) {
-      console.log("[登录失败] 验证码已过期");
-      return res.status(400).json({
-        code: 400,
-        message: "验证码已过期，请重新获取",
-      });
-    }
-
-    if (storedCaptcha !== captcha_code.toLowerCase()) {
+      if (process.env.NODE_ENV === 'production') {
+        console.log("[登录检查] 验证码缓存不可用，跳过验证码验证");
+      } else {
+        console.log("[登录失败] 验证码已过期");
+        return res.status(400).json({
+          code: 400,
+          message: "验证码已过期，请重新获取",
+        });
+      }
+    } else if (storedCaptcha !== captcha_code.toLowerCase()) {
       console.log("[登录失败] 验证码错误:", storedCaptcha, "!=", captcha_code.toLowerCase());
       return res.status(400).json({
         code: 400,
         message: "验证码错误",
       });
+    } else {
+      await redis.del(captcha_key);
     }
-
-    await redis.del(captcha_key);
 
     console.log("[登录检查] 查询用户:", username);
     const result = await query(

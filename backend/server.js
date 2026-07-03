@@ -47,10 +47,14 @@ app.get("/", (req, res) => {
   res.json({ message: "建筑属性查询服务运行中" });
 });
 
-const server = app.listen(PORT, () => {
-  console.log(`Server is running on http://localhost:${PORT}`);
-});
+module.exports = app;
 
-server.on("error", (err) => {
-  console.error("Server error:", err);
-});
+if (require.main === module) {
+  const server = app.listen(PORT, () => {
+    console.log(`Server is running on http://localhost:${PORT}`);
+  });
+
+  server.on("error", (err) => {
+    console.error("Server error:", err);
+  });
+}
