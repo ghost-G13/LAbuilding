@@ -12,6 +12,7 @@ console.log("[DB Config] DB_PASSWORD exists:", !!process.env.DB_PASSWORD);
 if (process.env.DATABASE_URL) {
   try {
     const url = new URL(process.env.DATABASE_URL);
+    const isPooler = parseInt(url.port) === 6543;
     config.development = {
       host: url.hostname,
       port: parseInt(url.port) || 5432,
@@ -21,9 +22,10 @@ if (process.env.DATABASE_URL) {
       ssl: {
         rejectUnauthorized: false,
         require: true
-      }
+      },
+      application_name: isPooler ? 'render-backend' : undefined
     };
-    console.log("[DB Config] Using DATABASE_URL, host:", url.hostname);
+    console.log("[DB Config] Using DATABASE_URL, host:", url.hostname, "port:", url.port, "pooler:", isPooler);
   } catch (e) {
     console.error("[DB Config] Invalid DATABASE_URL:", e.message);
     process.exit(1);
