@@ -1,4 +1,4 @@
-const BASE_URL = import.meta.env.VITE_API_URL || '/api'
+const BASE_URL = 'https://labbuilding.onrender.com/api'
 
 function getToken() {
   const user = JSON.parse(localStorage.getItem('user') || '{}')
