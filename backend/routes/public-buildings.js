@@ -13,7 +13,7 @@ router.get("/buildings", async (req, res) => {
       pageSize = 2000,
     } = req.query;
 
-    let sql = "SELECT lb.id, lb.bid, lb.height, lb.area_m2, lb.confidence, ST_AsGeoJSON(lb.geom) AS geometry FROM la_building lb WHERE lb.geom IS NOT NULL";
+    let sql = "SELECT lb.id, lb.bid, lb.height, lb.area_m2, lb.confidence, ST_AsGeoJSON(lb.geom) AS geometry FROM building_footprint lb WHERE lb.geom IS NOT NULL";
     const params = [];
 
     if (minHeight !== undefined) {
@@ -78,7 +78,7 @@ router.get("/buildings", async (req, res) => {
   }
 });
 
-router.get("/nofly-zones", async (req, res) => {
+router.get("/zones", async (req, res) => {
   try {
     const result = await query(
       `SELECT nz.bid, nz.zone_id, nz.zone_name, nz.restrict, nz.note, nz.flight_cei, nz.height_met, ST_AsGeoJSON(nz.geom) AS geometry FROM nofly_zone nz WHERE nz.geom IS NOT NULL`
