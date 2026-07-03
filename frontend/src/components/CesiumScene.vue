@@ -49,8 +49,9 @@ const i18n = {
 
 const t = computed(() => i18n[props.currentLanguage] || i18n['zh-CN'])
 
-const BUILDING_API_URL = '/api/public/buildings'
-const NO_FLY_ZONE_API_URL = '/api/nofly/zones'
+const BASE_URL = import.meta.env.VITE_API_URL || '/api'
+const BUILDING_API_URL = `${BASE_URL}/public/buildings`
+const NO_FLY_ZONE_API_URL = `${BASE_URL}/nofly/zones`
 
 const cesiumContainer = ref(null)
 const buildingLoadingText = ref('建筑白模：正在从服务器获取数据...')
