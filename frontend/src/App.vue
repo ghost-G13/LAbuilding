@@ -594,7 +594,10 @@ const filterTakeoffPoints = async () => {
   
   try {
     const BASE_URL = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '')
-const API_PREFIX = BASE_URL.includes('/api') ? BASE_URL : `${BASE_URL}/api`
+let API_PREFIX = BASE_URL
+if (!BASE_URL.includes('/api')) {
+  API_PREFIX = `${BASE_URL}/api`
+}
 const response = await fetch(`${API_PREFIX}/public/buildings?minHeight=${minH}&maxHeight=${maxH}&minArea=${minA}&maxArea=${maxA}&page=1&pageSize=1`)
     const result = await response.json()
     

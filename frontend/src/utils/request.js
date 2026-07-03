@@ -1,5 +1,8 @@
 const BASE_URL = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '')
-const API_PREFIX = BASE_URL.includes('/api') ? BASE_URL : `${BASE_URL}/api`
+let API_PREFIX = BASE_URL
+if (!BASE_URL.includes('/api')) {
+  API_PREFIX = `${BASE_URL}/api`
+}
 
 function getToken() {
   const user = JSON.parse(localStorage.getItem('user') || '{}')
