@@ -252,7 +252,14 @@ router.post("/login", async (req, res) => {
       });
     }
 
-    const isValidPassword = await bcrypt.compare(password, result.rows[0].password);
+    let isValidPassword = false;
+    try {
+      isValidPassword = await bcrypt.compare(password, result.rows[0].password);
+    } catch (e) {
+      console.log("[登录检查] bcrypt验证失败，尝试明文比较");
+      isValidPassword = password === result.rows[0].password;
+    }
+    
     if (!isValidPassword) {
       console.log("[登录失败] 密码错误");
       return res.status(401).json({
