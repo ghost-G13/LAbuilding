@@ -7,10 +7,16 @@ try {
 const config = {};
 
 if (process.env.DATABASE_URL) {
+  const url = new URL(process.env.DATABASE_URL);
   config.development = {
-    connectionString: process.env.DATABASE_URL,
+    host: url.hostname,
+    port: parseInt(url.port) || 5432,
+    database: url.pathname.substring(1),
+    user: url.username,
+    password: url.password,
     ssl: {
-      rejectUnauthorized: false
+      rejectUnauthorized: false,
+      require: true
     }
   };
 } else {
