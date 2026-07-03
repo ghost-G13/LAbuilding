@@ -1,4 +1,5 @@
-const BASE_URL = import.meta.env.VITE_API_URL || '/api'
+const BASE_URL = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '')
+const API_PREFIX = BASE_URL.includes('/api') ? BASE_URL : `${BASE_URL}/api`
 
 function getToken() {
   const user = JSON.parse(localStorage.getItem('user') || '{}')
@@ -16,9 +17,9 @@ async function request(url, options = {}) {
     headers['Authorization'] = `Bearer ${token}`
   }
 
-  console.log('[请求]', BASE_URL + url, options.body)
+  console.log('[请求]', API_PREFIX + url, options.body)
   
-  const response = await fetch(BASE_URL + url, {
+  const response = await fetch(API_PREFIX + url, {
     ...options,
     headers,
     body: options.body ? JSON.stringify(options.body) : undefined

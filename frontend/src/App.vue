@@ -593,7 +593,9 @@ const filterTakeoffPoints = async () => {
   filteredData.value = []
   
   try {
-    const response = await fetch(`/api/public/buildings?minHeight=${minH}&maxHeight=${maxH}&minArea=${minA}&maxArea=${maxA}&page=1&pageSize=1`)
+    const BASE_URL = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '')
+const API_PREFIX = BASE_URL.includes('/api') ? BASE_URL : `${BASE_URL}/api`
+const response = await fetch(`${API_PREFIX}/public/buildings?minHeight=${minH}&maxHeight=${maxH}&minArea=${minA}&maxArea=${maxA}&page=1&pageSize=1`)
     const result = await response.json()
     
     if (result.code === 0) {

@@ -16,6 +16,11 @@ const verifyToken = (token) => {
 };
 
 const authMiddleware = (req, res, next) => {
+  const whitelist = ["/api/auth/captcha", "/api/auth/send-code", "/api/auth/login", "/api/auth/register"];
+  if (whitelist.includes(req.path)) {
+    return next();
+  }
+
   const token = req.headers.authorization?.split(" ")[1];
 
   if (!token) {
