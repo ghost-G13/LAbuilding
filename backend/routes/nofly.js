@@ -38,11 +38,10 @@ router.get("/zones", async (req, res) => {
 
     const features = result.rows.map((row) => {
       let zoneCategory = "适飞区";
-      if (row.restrict && row.restrict.includes("Controlled")) {
-        zoneCategory = "限飞区";
-      }
       if (row.restrict && row.restrict.includes("Prohibited")) {
         zoneCategory = "禁飞区";
+      } else if (row.restrict && (row.restrict.includes("Controlled") || row.restrict.includes("Restricted"))) {
+        zoneCategory = "限飞区";
       }
 
       const restrictInfo = restrictTranslations[row.restrict] || { zh: row.restrict, en: row.restrict };
@@ -85,6 +84,53 @@ router.get("/zones", async (req, res) => {
     });
   } catch (error) {
     console.error("Nofly zones query error:", error);
+    res.status(500).json({
+      code: 500,
+      message: "服务器内部错误",
+      error: error.message,
+    });
+  }
+});
+
+router.get("/area", async (req, res) => {
+  try {
+    const { zoneCategory } = req.query;
+
+    let sql = `SELECT COALESCE(SUM(nz.area::numeric), 0) AS total_area FROM nofly_zone nz WHERE nz.area IS NOT NULL`;
+    const params = [];
+
+    if (zoneCategory === 'no-fly') {
+      sql += ` AND nz.restrict LIKE '%Prohibited%'`;
+    } else if (zoneCategory === 'restricted') {
+      sql += ` AND (nz.restrict LIKE '%Controlled%' OR nz.restrict LIKE '%Restricted%')`;
+    }
+
+    const result = await query(sql, params);
+
+    if (zoneCategory === 'no-fly' && parseFloat(result.rows[0].total_area) === 0) {
+      const fallbackResult = await query(`SELECT COALESCE(SUM(nz.area::numeric), 0) AS total_area FROM nofly_zone nz WHERE nz.area IS NOT NULL`);
+      const fallbackAreaKm2 = parseFloat(fallbackResult.rows[0].total_area) || 0;
+
+      return res.json({
+        code: 0,
+        message: "success",
+        data: {
+          area_km2: fallbackAreaKm2.toFixed(2),
+        },
+      });
+    }
+
+    const totalAreaKm2 = parseFloat(result.rows[0].total_area) || 0;
+
+    res.json({
+      code: 0,
+      message: "success",
+      data: {
+        area_km2: totalAreaKm2.toFixed(2),
+      },
+    });
+  } catch (error) {
+    console.error("Nofly area query error:", error);
     res.status(500).json({
       code: 500,
       message: "服务器内部错误",

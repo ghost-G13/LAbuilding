@@ -40,7 +40,8 @@ router.get("/", async (req, res) => {
     const total = parseInt(countResult.rows[0].total);
 
     const start = (Number(page) - 1) * Number(pageSize);
-    sql += ` OFFSET ${start} LIMIT ${pageSize}`;
+    params.push(start, Number(pageSize));
+    sql += ` OFFSET $${params.length - 1} LIMIT $${params.length}`;
 
     const result = await query(sql, params);
 
@@ -91,7 +92,7 @@ router.get("/point-query", async (req, res) => {
     }
 
     const result = await query(
-      `SELECT lb.id, lb.bid, lb.height, lb.area_m2, lb.confidence, lb.height_fil, nz.zone_name, nz.flight_cei, nz.restrict, ST_AsGeoJSON(lb.geom) AS geometry FROM la_building lb LEFT JOIN nofly_zone nz ON lb.geom && nz.geom WHERE ST_Contains(lb.geom, ST_SetSRID(ST_MakePoint($1, $2), 4326)) AND lb.geom IS NOT NULL LIMIT 1`,
+      `SELECT lb.id, lb.bid, lb.height, lb.area_m2, lb.confidence, lb.height_fil, nz.zone_name, nz.flight_cei, nz.restrict, ST_AsGeoJSON(lb.geom) AS geometry FROM la_building lb LEFT JOIN LATERAL (SELECT zone_name, flight_cei, restrict FROM nofly_zone WHERE ST_Intersects(lb.geom, nofly_zone.geom) AND geom IS NOT NULL LIMIT 1) nz ON true WHERE ST_Contains(lb.geom, ST_SetSRID(ST_MakePoint($1, $2), 4326)) AND lb.geom IS NOT NULL LIMIT 1`,
       [parseFloat(lng), parseFloat(lat)]
     );
 
@@ -140,7 +141,7 @@ router.get("/:bid", async (req, res) => {
     const { bid } = req.params;
 
     const result = await query(
-      `SELECT lb.id, lb.bid, lb.height, lb.area_m2, lb.confidence, lb.height_fil, nz.zone_name, nz.flight_cei, nz.restrict, ST_AsGeoJSON(lb.geom) AS geometry FROM la_building lb LEFT JOIN nofly_zone nz ON lb.geom && nz.geom WHERE lb.bid = $1 AND lb.geom IS NOT NULL LIMIT 1`,
+      `SELECT lb.id, lb.bid, lb.height, lb.area_m2, lb.confidence, lb.height_fil, nz.zone_name, nz.flight_cei, nz.restrict, ST_AsGeoJSON(lb.geom) AS geometry FROM la_building lb LEFT JOIN LATERAL (SELECT zone_name, flight_cei, restrict FROM nofly_zone WHERE ST_Intersects(lb.geom, nofly_zone.geom) AND geom IS NOT NULL LIMIT 1) nz ON true WHERE lb.bid = $1 AND lb.geom IS NOT NULL LIMIT 1`,
       [bid]
     );
 

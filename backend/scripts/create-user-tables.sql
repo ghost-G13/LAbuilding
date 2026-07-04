@@ -26,10 +26,10 @@ CREATE INDEX IF NOT EXISTS idx_userdata_user_id ON userdata(user_id);
 CREATE INDEX IF NOT EXISTS idx_userdata_query_type ON userdata(query_type);
 CREATE INDEX IF NOT EXISTS idx_userdata_created_at ON userdata(created_at);
 
--- 插入测试用户 (密码: 123456，实际应用中应该加密存储)
+-- 插入测试用户 (密码: admin123)
 INSERT INTO users (username, password, email, role) VALUES 
-  ('admin', 'admin123', 'admin@example.com', 'admin'),
-  ('planner', 'planner123', 'planner@example.com', 'planner'),
-  ('dispatcher', 'dispatcher123', 'dispatcher@example.com', 'dispatcher'),
-  ('regulator', 'regulator123', 'regulator@example.com', 'regulator')
+  ('admin', '$2b$10$M7xKncsh82JnQyXAzKFXjeigl3eZ23N4BzlV3h/i9PquzEfQ3DAdq', 'admin@example.com', 'admin'),
+  ('planner', '$2b$10$M7xKncsh82JnQyXAzKFXjeigl3eZ23N4BzlV3h/i9PquzEfQ3DAdq', 'planner@example.com', 'planner'),
+  ('dispatcher', '$2b$10$M7xKncsh82JnQyXAzKFXjeigl3eZ23N4BzlV3h/i9PquzEfQ3DAdq', 'dispatcher@example.com', 'dispatcher'),
+  ('regulator', '$2b$10$M7xKncsh82JnQyXAzKFXjeigl3eZ23N4BzlV3h/i9PquzEfQ3DAdq', 'regulator@example.com', 'regulator')
 ON CONFLICT (username) DO NOTHING;

@@ -37,7 +37,8 @@ export default defineConfig({
 
 ### 核心概念
 
-- 除了 `/api/auth/*` 接口外，**所有接口都需要登录**
+- `/api/auth/*` 和 `/api/public/*` 接口**不需要登录**
+- 其他所有接口（`/api/buildings/*`, `/api/build/*`, `/api/uav/*`, `/api/nofly/*`, `/api/userdata/*`, `/api/admin/*`）**需要登录**
 - 登录成功后返回 `token`（JWT格式）
 - 请求时在请求头携带：`Authorization: Bearer <token>`
 
@@ -66,206 +67,407 @@ export default defineConfig({
 
 ```javascript
 // utils/request.js
-const BASE_URL = '/api'
+import axios from 'axios'
 
-function getToken() {
-  const user = JSON.parse(localStorage.getItem('user') || '{}')
-  return user.token || ''
-}
+const service = axios.create({
+  baseURL: '/api',
+  timeout: 30000
+})
 
-async function request(url, options = {}) {
-  const headers = {
-    'Content-Type': 'application/json',
-    ...options.headers
+service.interceptors.request.use(
+  config => {
+    const user = JSON.parse(localStorage.getItem('user') || '{}')
+    if (user.token) {
+      config.headers['Authorization'] = `Bearer ${user.token}`
+    }
+    return config
+  },
+  error => {
+    return Promise.reject(error)
   }
+)
 
-  const token = getToken()
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`
+service.interceptors.response.use(
+  response => {
+    const res = response.data
+    if (res.code === 401) {
+      localStorage.removeItem('user')
+      window.dispatchEvent(new Event('auth-logout'))
+      return Promise.reject(new Error('请先登录'))
+    }
+    if (res.code !== 0) {
+      return Promise.reject(new Error(res.message || '请求失败'))
+    }
+    return res
+  },
+  error => {
+    return Promise.reject(error)
   }
+)
 
-  const response = await fetch(BASE_URL + url, {
-    ...options,
-    headers,
-    body: options.body ? JSON.stringify(options.body) : undefined
-  })
-
-  const data = await response.json()
-
-  if (data.code === 401) {
-    localStorage.removeItem('user')
-    window.location.href = '/login'
-    throw new Error('请先登录')
-  }
-
-  if (data.code !== 0) {
-    throw new Error(data.message || '请求失败')
-  }
-
-  return data.data
-}
-
-export default request
+export default service
 ```
 
 ---
 
-## 四、常用接口示例
+## 四、公开接口（不需要登录）
 
-### 1. 注册
+### 1. 获取建筑列表
 
 ```javascript
-import request from '@/utils/request'
+// GET /api/public/buildings
+async function getPublicBuildings(params) {
+  return request({
+    url: '/public/buildings',
+    method: 'GET',
+    params
+  })
+  // 参数: minHeight, maxHeight, minArea, maxArea, page, pageSize
+  // 返回: { code, message, data: { type, features }, count, total, page, pageSize }
+}
+```
 
-// 1. 获取图形验证码
+### 2. 获取禁飞区数据
+
+```javascript
+// GET /api/public/nofly-zones
+async function getNoFlyZones(lang = 'zh') {
+  return request({
+    url: '/public/nofly-zones',
+    method: 'GET',
+    params: { lang }
+  })
+  // 参数: lang - 'zh' 或 'en'，控制语言显示
+  // 返回: { code, message, data: { type, features }, count }
+  // features[].properties 包含: id, bid, zone_id, zone_name, restriction, note, flight_ceiling, height_meters, zone_category, area
+}
+```
+
+### 3. 获取禁飞区总面积
+
+```javascript
+// GET /api/public/nofly-area
+async function getNoFlyZoneArea(params = {}) {
+  return request({
+    url: '/public/nofly-area',
+    method: 'GET',
+    params
+  })
+  // 参数: zoneCategory (可选) - 'no-fly' 或 'restricted'
+  // 返回: { code, message, data: { area_km2 } }
+}
+```
+
+---
+
+## 五、认证接口
+
+### 1. 获取图形验证码
+
+```javascript
+// GET /api/auth/captcha
 async function getCaptcha() {
-  return request('/auth/captcha')
-  // 返回: { image: '<svg>...</svg>', captcha_key: 'xxx', expires_in: 120 }
+  return request({ url: '/auth/captcha', method: 'GET' })
+  // 返回: { code, message, data: { image, captcha_key, expires_in } }
 }
+```
 
-// 2. 发送注册验证码
+### 2. 发送注册验证码
+
+```javascript
+// POST /api/auth/send-code
 async function sendCode(identifier) {
-  return request('/auth/send-code', {
+  return request({
+    url: '/auth/send-code',
     method: 'POST',
-    body: { identifier } // identifier 是邮箱或手机号
+    data: { identifier }
   })
 }
+```
 
-// 3. 注册
+### 3. 用户注册
+
+```javascript
+// POST /api/auth/register
 async function register(userInfo) {
-  return request('/auth/register', {
+  return request({
+    url: '/auth/register',
     method: 'POST',
-    body: userInfo
-    // userInfo: { username, password, identifier, code, role }
+    data: userInfo
   })
+  // userInfo: { username, password, identifier, code, role }
 }
 ```
 
-### 2. 登录
+### 4. 用户登录
 
 ```javascript
-// 登录页面组件示例
+// POST /api/auth/login
 async function login(username, password, captcha_key, captcha_code) {
-  const userData = await request('/auth/login', {
+  const res = await request({
+    url: '/auth/login',
     method: 'POST',
-    body: { username, password, captcha_key, captcha_code }
+    data: { username, password, captcha_key, captcha_code }
   })
-  
-  // 保存用户信息和token
-  localStorage.setItem('user', JSON.stringify(userData))
-  
-  return userData
+  localStorage.setItem('user', JSON.stringify(res.data))
+  return res.data
 }
 ```
 
-### 3. 图形验证码组件
-
-```vue
-<template>
-  <div class="captcha-wrapper">
-    <div v-html="captchaImage" @click="refreshCaptcha" 
-         style="cursor: pointer; display: inline-block;" />
-    <span style="margin-left: 8px; color: #999; font-size: 12px;">点击刷新</span>
-  </div>
-</template>
-
-<script setup>
-import { ref, onMounted } from 'vue'
-import request from '@/utils/request'
-
-const emit = defineEmits(['update:modelValue'])
-
-const captchaImage = ref('')
-const captchaKey = ref('')
-
-async function refreshCaptcha() {
-  const data = await request('/auth/captcha')
-  captchaImage.value = data.image
-  captchaKey.value = data.captcha_key
-  emit('update:modelValue', data.captcha_key)
-}
-
-onMounted(refreshCaptcha)
-
-defineExpose({ refreshCaptcha, captchaKey })
-</script>
-```
-
-### 4. 建筑点选查询
+### 5. 获取用户信息
 
 ```javascript
+// GET /api/auth/info/:userId
+async function getUserInfo(userId) {
+  return request({ url: `/auth/info/${userId}`, method: 'GET' })
+}
+```
+
+---
+
+## 六、建筑查询接口（需要登录）
+
+### 1. 点选建筑属性查询
+
+```javascript
+// GET /api/buildings/point-query
 async function queryBuilding(lng, lat) {
-  return request(`/buildings/point-query?lng=${lng}&lat=${lat}`)
+  return request({
+    url: '/buildings/point-query',
+    method: 'GET',
+    params: { lng, lat }
+  })
 }
 ```
 
-### 5. 保存查询记录
+### 2. 获取建筑列表
 
 ```javascript
-async function saveQueryRecord(queryType, params, result) {
-  return request('/userdata/save', {
+// GET /api/buildings
+async function getBuildings(params) {
+  return request({
+    url: '/buildings',
+    method: 'GET',
+    params
+  })
+  // 参数: minHeight, maxHeight, minArea, maxArea, page, pageSize
+}
+```
+
+### 3. 获取单个建筑详情
+
+```javascript
+// GET /api/buildings/:bid
+async function getBuildingDetail(bid) {
+  return request({ url: `/buildings/${bid}`, method: 'GET' })
+}
+```
+
+---
+
+## 七、低空选址筛选接口（需要登录）
+
+### 获取建筑
+
+```javascript
+// GET /api/build/takeoff-filter
+async function getTakeoffPoints(minHeight, maxHeight, minArea, maxArea) {
+  return request({
+    url: '/build/takeoff-filter',
+    method: 'GET',
+    params: { minHeight, maxHeight, minArea, maxArea }
+  })
+}
+```
+
+---
+
+## 八、飞行区域碰撞预警接口（需要登录）
+
+### 航线检测
+
+```javascript
+// POST /api/uav/route-check
+async function checkRouteCollision(route, flightHeight) {
+  return request({
+    url: '/uav/route-check',
     method: 'POST',
-    body: {
-      query_type: queryType,      // point-query / takeoff-filter / route-check / nofly-zones
-      query_params: params,       // 查询参数对象
-      result_count: 1,            // 结果数量
-      result_data: result         // 完整结果（可选）
+    data: { route, flightHeight }
+  })
+}
+```
+
+---
+
+## 九、禁飞区接口（需要登录）
+
+### 1. 获取所有禁飞区
+
+```javascript
+// GET /api/nofly/zones
+async function getNoFlyZonesAuth(params = {}) {
+  return request({
+    url: '/nofly/zones',
+    method: 'GET',
+    params
+  })
+}
+```
+
+### 2. 获取单个禁飞区详情
+
+```javascript
+// GET /api/nofly/:zoneId
+async function getNoFlyZoneDetail(zoneId) {
+  return request({ url: `/nofly/${zoneId}`, method: 'GET' })
+}
+```
+
+### 3. 获取禁飞区面积
+
+```javascript
+// GET /api/nofly/area
+async function getNoFlyZoneAreaAuth(params = {}) {
+  return request({
+    url: '/nofly/area',
+    method: 'GET',
+    params
+  })
+}
+```
+
+---
+
+## 十、用户查询记录接口（需要登录）
+
+### 1. 保存查询记录
+
+```javascript
+// POST /api/userdata/save
+async function saveQueryRecord(queryType, params, result) {
+  return request({
+    url: '/userdata/save',
+    method: 'POST',
+    data: {
+      query_type: queryType,
+      query_params: params,
+      result_count: result?.length || 1,
+      result_data: result
     }
   })
 }
-
-// 使用示例
-const building = await queryBuilding(-118.208, 34.08)
-await saveQueryRecord('point-query', { lng: -118.208, lat: 34.08 }, building)
 ```
 
-### 6. 获取我的查询记录
+### 2. 获取查询记录列表
 
 ```javascript
+// GET /api/userdata/list
 async function getMyRecords(page = 1, pageSize = 10, queryType = '') {
-  let url = `/userdata/list?page=${page}&pageSize=${pageSize}`
-  if (queryType) url += `&query_type=${queryType}`
-  return request(url)
-}
-```
-
-### 7. 起降点分析
-
-```javascript
-async function getTakeoffPoints(minHeight, maxHeight, minArea, maxArea) {
-  return request(`/build/takeoff-filter?minHeight=${minHeight}&maxHeight=${maxHeight}&minArea=${minArea}&maxArea=${maxArea}`)
-}
-```
-
-### 8. 航线碰撞检测
-
-```javascript
-async function checkRouteCollision(route, flightHeight) {
-  return request('/uav/route-check', {
-    method: 'POST',
-    body: { route, flightHeight }
+  return request({
+    url: '/userdata/list',
+    method: 'GET',
+    params: { page, pageSize, query_type: queryType }
   })
 }
 ```
 
-### 9. 禁飞区查询
+### 3. 获取单条记录详情
 
 ```javascript
-async function getNoFlyZones() {
-  return request('/nofly/zones')
+// GET /api/userdata/detail/:recordId
+async function getRecordDetail(recordId) {
+  return request({ url: `/userdata/detail/${recordId}`, method: 'GET' })
+}
+```
+
+### 4. 删除查询记录
+
+```javascript
+// DELETE /api/userdata/delete/:recordId
+async function deleteRecord(recordId) {
+  return request({ url: `/userdata/delete/${recordId}`, method: 'DELETE' })
 }
 ```
 
 ---
 
-## 五、路由守卫（Vue Router）
+## 十一、管理员接口（需要登录，仅 admin 角色可用）
+
+### 1. 获取用户列表
+
+```javascript
+// GET /api/admin/users
+async function getUsers(page = 1, pageSize = 20, role = '') {
+  return request({
+    url: '/admin/users',
+    method: 'GET',
+    params: { page, pageSize, role }
+  })
+}
+```
+
+### 2. 获取用户详情
+
+```javascript
+// GET /api/admin/user/:userId
+async function getUserDetail(userId) {
+  return request({ url: `/admin/user/${userId}`, method: 'GET' })
+}
+```
+
+### 3. 更新用户角色
+
+```javascript
+// PUT /api/admin/user/:userId/role
+async function updateUserRole(userId, role) {
+  return request({
+    url: `/admin/user/${userId}/role`,
+    method: 'PUT',
+    data: { role }
+  })
+}
+```
+
+### 4. 删除用户
+
+```javascript
+// DELETE /api/admin/user/:userId
+async function deleteUser(userId) {
+  return request({ url: `/admin/user/${userId}`, method: 'DELETE' })
+}
+```
+
+### 5. 查看指定用户的查询记录
+
+```javascript
+// GET /api/admin/userdata/:userId
+async function getUserRecords(userId, page = 1, pageSize = 20) {
+  return request({
+    url: `/admin/userdata/${userId}`,
+    method: 'GET',
+    params: { page, pageSize }
+  })
+}
+```
+
+### 6. 系统统计
+
+```javascript
+// GET /api/admin/stats
+async function getStats() {
+  return request({ url: '/admin/stats', method: 'GET' })
+}
+```
+
+---
+
+## 十二、路由守卫（Vue Router）
 
 ```javascript
 // router/index.js
 router.beforeEach((to, from, next) => {
   const token = localStorage.getItem('user') ? JSON.parse(localStorage.getItem('user')).token : ''
   
-  // 需要登录的页面
   if (to.meta.requiresAuth && !token) {
     next('/login')
     return
@@ -282,14 +484,14 @@ const routes = [
   { 
     path: '/home', 
     component: Home,
-    meta: { requiresAuth: true }  // 需要登录
+    meta: { requiresAuth: true }
   }
 ]
 ```
 
 ---
 
-## 六、角色权限判断
+## 十三、角色权限判断
 
 ### 角色列表
 
@@ -325,56 +527,11 @@ function hasRole(minRole) {
   const minLevel = roleLevels[minRole] || 0
   return userLevel >= minLevel
 }
-
-// 使用示例
-if (isAdmin()) {
-  // 显示管理员菜单
-}
-
-if (hasRole('dispatcher')) {
-  // 调度人员及以上可以看到航线功能
-}
 ```
 
 ---
 
-## 七、管理员接口（仅 admin 角色可用）
-
-```javascript
-// 获取用户列表
-async function getUsers(page = 1, pageSize = 20) {
-  return request(`/admin/users?page=${page}&pageSize=${pageSize}`)
-}
-
-// 更新用户角色
-async function updateUserRole(userId, role) {
-  return request(`/admin/user/${userId}/role`, {
-    method: 'PUT',
-    body: { role }
-  })
-}
-
-// 删除用户
-async function deleteUser(userId) {
-  return request(`/admin/user/${userId}`, {
-    method: 'DELETE'
-  })
-}
-
-// 查看指定用户的查询记录
-async function getUserRecords(userId, page = 1, pageSize = 20) {
-  return request(`/admin/userdata/${userId}?page=${page}&pageSize=${pageSize}`)
-}
-
-// 系统统计
-async function getStats() {
-  return request('/admin/stats')
-}
-```
-
----
-
-## 八、测试账号
+## 十四、测试账号
 
 | 用户名 | 密码 | 角色 |
 |--------|------|------|
@@ -385,7 +542,7 @@ async function getStats() {
 
 ---
 
-## 九、常见问题
+## 十五、常见问题
 
 ### Q: 接口返回 401？
 A: token 过期或未登录，清除 localStorage 跳转到登录页。
@@ -397,26 +554,25 @@ A: 权限不足，当前用户角色没有访问该接口的权限。
 A: 接口返回的 `image` 字段是 SVG 字符串，直接用 `v-html` 渲染即可。
 
 ### Q: 注册验证码在哪里？
-A: 开发环境下，验证码会打印在后端服务器控制台。生产环境需要配置短信或邮件服务。
+A: 开发环境下，验证码会打印在后端服务器控制台。生产环境需要配置邮件服务。
 
-### Q: 怎么保存查询记录？
-A: 每次查询后调用 `/api/userdata/save` 接口，`user_id` 会自动从 token 中获取，不需要传。
+### Q: 禁飞区数据中 area 字段的单位是什么？
+A: `area` 字段的单位是 **平方公里（km²）**。
+
+### Q: 禁飞区的 note 字段支持多语言吗？
+A: 支持。数据库中存储格式为 "英文 | 中文"，通过 `lang` 参数控制显示语言。
 
 ### Q: 航线检测的 route 参数格式？
-A: GeoJSON LineString 格式，例如：
+A: GeoJSON LineString 格式：
 ```javascript
 {
   type: 'LineString',
-  coordinates: [
-    [lng1, lat1],
-    [lng2, lat2],
-    [lng3, lat3]
-  ]
+  coordinates: [[lng1, lat1], [lng2, lat2], [lng3, lat3]]
 }
 ```
 
 ---
 
-## 十、完整接口文档
+## 十六、完整接口文档
 
 详细接口文档请参考：[API_DOCUMENT.md](./API_DOCUMENT.md)

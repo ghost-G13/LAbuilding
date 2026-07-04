@@ -22,7 +22,8 @@ router.get("/users", requireRole("admin"), async (req, res) => {
     const total = parseInt(countResult.rows[0].total);
 
     const start = (Number(page) - 1) * Number(pageSize);
-    sql += ` ORDER BY id DESC OFFSET ${start} LIMIT ${pageSize}`;
+    params.push(start, Number(pageSize));
+    sql += ` ORDER BY id DESC OFFSET $${params.length - 1} LIMIT $${params.length}`;
 
     const result = await query(sql, params);
 
@@ -146,7 +147,8 @@ router.get("/userdata/:userId", requireRole("admin"), async (req, res) => {
     const total = parseInt(countResult.rows[0].total);
 
     const start = (Number(page) - 1) * Number(pageSize);
-    sql += ` ORDER BY created_at DESC OFFSET ${start} LIMIT ${pageSize}`;
+    params.push(start, Number(pageSize));
+    sql += ` ORDER BY created_at DESC OFFSET $${params.length - 1} LIMIT $${params.length}`;
 
     const result = await query(sql, params);
 
@@ -256,7 +258,7 @@ router.delete("/user/:userId", requireRole("admin"), async (req, res) => {
   try {
     const { userId } = req.params;
 
-    if (parseInt(userId) === req.user.id) {
+    if (parseInt(userId) === parseInt(req.user.id)) {
       return res.status(400).json({
         code: 400,
         message: "不能删除自己",

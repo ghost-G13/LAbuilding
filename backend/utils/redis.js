@@ -1,5 +1,14 @@
 const memoryStore = {};
 
+setInterval(() => {
+  const now = Date.now();
+  for (const key of Object.keys(memoryStore)) {
+    if (memoryStore[key].expiresAt <= now) {
+      delete memoryStore[key];
+    }
+  }
+}, 60000);
+
 const set = async (key, value, ttl) => {
   memoryStore[key] = {
     value,

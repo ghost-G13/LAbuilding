@@ -1,3 +1,22 @@
+try {
+  require("dotenv").config();
+} catch (e) {
+  console.log("dotenv not available, using environment variables");
+}
+
+const requiredEnvVars = ["DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD"];
+const missingVars = requiredEnvVars.filter((varName) => !process.env[varName]);
+
+if (missingVars.length > 0) {
+  console.error(`ERROR: Missing required environment variables: ${missingVars.join(", ")}`);
+  console.error("Please create a .env file in the backend directory with all required variables.");
+  process.exit(1);
+}
+
+if (!process.env.JWT_SECRET || process.env.JWT_SECRET === "your-strong-secret-key-change-in-production") {
+  console.warn("WARNING: JWT_SECRET is not set or using default value. Please set a secure secret in .env for production.");
+}
+
 const express = require("express");
 const cors = require("cors");
 const buildingRoutes = require("./routes/buildings");
@@ -20,7 +39,20 @@ process.on("uncaughtException", (error) => {
   console.error("Uncaught Exception:", error);
 });
 
-app.use(cors());
+const allowedOrigins = process.env.CORS_ORIGIN 
+  ? process.env.CORS_ORIGIN.split(',') 
+  : ['http://localhost:5173', 'http://localhost:3000', 'http://127.0.0.1:5173', 'http://127.0.0.1:3000'];
+
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true
+}));
 app.use(express.json({ limit: "50mb" }));
 app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
@@ -32,7 +64,6 @@ app.use("/api/auth", authRoutes);
 
 const publicBuildingRoutes = require("./routes/public-buildings");
 app.use("/api/public", publicBuildingRoutes);
-app.use("/api/nofly", noflyRoutes);
 
 app.use(authMiddleware);
 

@@ -14,7 +14,6 @@ router.post("/route-check", async (req, res) => {
     }
 
     const routeGeoJson = JSON.stringify(route);
-    const routeGeom = `ST_SetSRID(ST_GeomFromGeoJSON('${routeGeoJson}'), 4326)`;
 
     const risks = {
       building_collision: [],
@@ -30,14 +29,14 @@ router.post("/route-check", async (req, res) => {
         lb.area_m2,
         lb.confidence,
         ST_AsGeoJSON(lb.geom) AS geometry,
-        ST_AsGeoJSON(ST_Intersection(lb.geom, ${routeGeom})) AS collision_point
+        ST_AsGeoJSON(ST_Intersection(lb.geom, ST_SetSRID(ST_GeomFromGeoJSON($1), 4326))) AS collision_point
       FROM la_building lb
-      WHERE ST_Intersects(lb.geom, ${routeGeom})
+      WHERE ST_Intersects(lb.geom, ST_SetSRID(ST_GeomFromGeoJSON($1), 4326))
         AND lb.geom IS NOT NULL
-        AND lb.height > $1
+        AND lb.height > $2
     `;
 
-    const buildingResult = await query(buildingQuery, [maxAltitude]);
+    const buildingResult = await query(buildingQuery, [routeGeoJson, maxAltitude]);
 
     if (buildingResult.rows.length > 0) {
       risks.building_collision = buildingResult.rows.map((row) => ({
@@ -59,13 +58,13 @@ router.post("/route-check", async (req, res) => {
         nz.flight_cei,
         nz.restrict,
         ST_AsGeoJSON(nz.geom) AS geometry,
-        ST_AsGeoJSON(ST_Intersection(nz.geom, ${routeGeom})) AS intrusion_point
+        ST_AsGeoJSON(ST_Intersection(nz.geom, ST_SetSRID(ST_GeomFromGeoJSON($1), 4326))) AS intrusion_point
       FROM nofly_zone nz
-      WHERE ST_Intersects(nz.geom, ${routeGeom})
+      WHERE ST_Intersects(nz.geom, ST_SetSRID(ST_GeomFromGeoJSON($1), 4326))
         AND nz.geom IS NOT NULL
     `;
 
-    const noflyResult = await query(noflyQuery, []);
+    const noflyResult = await query(noflyQuery, [routeGeoJson]);
 
     if (noflyResult.rows.length > 0) {
       risks.nofly_zone = noflyResult.rows.map((row) => ({
@@ -82,13 +81,12 @@ router.post("/route-check", async (req, res) => {
 
     if (flightBounds) {
       const boundsGeoJson = JSON.stringify(flightBounds);
-      const boundsGeom = `ST_SetSRID(ST_GeomFromGeoJSON('${boundsGeoJson}'), 4326)`;
 
       const boundaryQuery = `
-        SELECT ST_Covers(${boundsGeom}, ${routeGeom}) AS is_covered
+        SELECT ST_Covers(ST_SetSRID(ST_GeomFromGeoJSON($1), 4326), ST_SetSRID(ST_GeomFromGeoJSON($2), 4326)) AS is_covered
       `;
 
-      const boundaryResult = await query(boundaryQuery, []);
+      const boundaryResult = await query(boundaryQuery, [boundsGeoJson, routeGeoJson]);
       risks.boundary_violation = !boundaryResult.rows[0].is_covered;
     }
 

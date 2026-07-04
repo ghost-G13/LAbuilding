@@ -17,7 +17,7 @@ if (!process.env.DB_PASSWORD) {
 
 async function run() {
   try {
-    const sql = fs.readFileSync("./scripts/update-user-table.sql", "utf8");
+    const sql = fs.readFileSync("./scripts/create-user-tables.sql", "utf8");
     await pool.query(sql);
     console.log("User table updated successfully");
   } catch (error) {

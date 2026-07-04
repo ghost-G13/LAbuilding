@@ -6,7 +6,7 @@
 - **字符编码**: UTF-8
 - **认证方式**: JWT Token（请求头 `Authorization: Bearer <token>`）
 
-> **重要**: 除 `/api/auth/*` 接口外，所有接口都需要登录认证，未登录返回 401。
+> **重要**: `/api/auth/*` 和 `/api/public/*` 接口不需要登录，其他所有接口都需要登录认证，未登录返回 401。
 
 ---
 
@@ -122,55 +122,143 @@
 - **需要登录**
 - **示例**: `/api/auth/info/1`
 
----
-
-## 二、用户查询记录接口 (/api/userdata)
-
-> 所有接口需要登录，用户只能操作自己的记录
-
-### 1. 保存查询记录
-- **URL**: `/api/userdata/save`
+### 6. 忘记密码 - 发送验证码
+- **URL**: `/api/auth/forgot-password`
 - **方法**: POST
-- **需要登录**
+- **不需要登录**
 - **请求体**:
 ```json
 {
-  "query_type": "point-query",
-  "query_params": { "lng": -118.208, "lat": 34.08 },
-  "result_count": 1,
-  "result_data": { ... }
+  "identifier": "user@example.com"
 }
 ```
-- **参数说明**:
-  - `query_type`: 查询类型，可选值：
-    - `point-query`: 点选建筑查询
-    - `takeoff-filter`: 起降点分析
-    - `route-check`: 航线碰撞检测
-    - `nofly-zones`: 禁飞区查询
-  - `query_params`: 查询参数（JSON 对象）
-  - `result_count`: 结果数量
-  - `result_data`: 查询结果数据（JSON 对象，可选）
-- **注意**: `user_id` 从登录 token 中自动获取，不需要传
+- **响应**:
+```json
+{
+  "code": 0,
+  "message": "验证码已发送",
+  "data": {
+    "identifier": "user@example.com",
+    "expires_in": 300
+  }
+}
+```
 
-### 2. 获取查询记录列表
-- **URL**: `/api/userdata/list`
+### 7. 重置密码
+- **URL**: `/api/auth/reset-password`
+- **方法**: POST
+- **不需要登录**
+- **请求体**:
+```json
+{
+  "identifier": "user@example.com",
+  "code": "123456",
+  "password": "newpassword123"
+}
+```
+
+---
+
+## 二、公开接口 (/api/public)
+
+> 所有接口不需要登录
+
+### 1. 获取建筑列表
+- **URL**: `/api/public/buildings`
 - **方法**: GET
-- **需要登录**
 - **参数**:
-  - `query_type`: 查询类型（可选，筛选）
+  - `minHeight`: 最小高度（可选）
+  - `maxHeight`: 最大高度（可选）
+  - `minArea`: 最小面积（可选）
+  - `maxArea`: 最大面积（可选）
   - `page`: 页码（默认 1）
-  - `pageSize`: 每页数量（默认 20）
-- **示例**: `/api/userdata/list?page=1&pageSize=10&query_type=point-query`
+  - `pageSize`: 每页数量（默认 2000）
+- **响应**:
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "type": "FeatureCollection",
+    "features": [
+      {
+        "type": "Feature",
+        "properties": {
+          "id": 1,
+          "bid": "0",
+          "height": 3.36,
+          "area_m2": 100.14,
+          "confidence": -1
+        },
+        "geometry": { "type": "Polygon", "coordinates": [...] }
+      }
+    ]
+  },
+  "count": 2000,
+  "total": 76634,
+  "page": 1,
+  "pageSize": 2000
+}
+```
 
-### 3. 获取单条记录详情
-- **URL**: `/api/userdata/detail/:recordId`
+### 2. 获取禁飞区数据
+- **URL**: `/api/public/nofly-zones`
 - **方法**: GET
-- **需要登录**
+- **参数**:
+  - `lang`: 语言（可选，默认 `zh`），可选值：`zh` / `en`
+- **响应**:
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "type": "FeatureCollection",
+    "features": [
+      {
+        "type": "Feature",
+        "properties": {
+          "id": "17",
+          "bid": "17",
+          "zone_id": "D_PMD003",
+          "zone_name": "Class D - PMD",
+          "restriction": "管制空域",
+          "note": "有效期：2026年1月1日-2026年12月31日...",
+          "flight_ceiling": 0,
+          "height_meters": 0,
+          "zone_category": "限飞区",
+          "area": 214.36
+        },
+        "geometry": { "type": "Polygon", "coordinates": [...] }
+      }
+    ]
+  },
+  "count": 32
+}
+```
+- **说明**:
+  - `area` 字段单位为 **平方公里（km²）**
+  - `note` 和 `restriction` 字段根据 `lang` 参数返回对应语言
+  - 数据库中 note 存储格式为 "英文 | 中文"
 
-### 4. 删除查询记录
-- **URL**: `/api/userdata/delete/:recordId`
-- **方法**: DELETE
-- **需要登录**
+### 3. 获取禁飞区总面积
+- **URL**: `/api/public/nofly-area`
+- **方法**: GET
+- **参数**:
+  - `zoneCategory`: 区域类型（可选），可选值：
+    - `no-fly`: 禁飞区（Prohibited）
+    - `restricted`: 限飞区（Controlled/Restricted）
+    - 不传：查询所有禁飞区
+- **响应**:
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "area_km2": "4889.32"
+  }
+}
+```
+- **说明**: `area_km2` 单位为 **平方公里（km²）**
 
 ---
 
@@ -199,7 +287,7 @@
       "area_m2": 100.14,
       "confidence": -1,
       "zone_name": null,
-      "flight_ceil": null,
+      "flight_cei": null,
       "restriction": null
     },
     "geometry": { "type": "Polygon", "coordinates": [...] }
@@ -272,17 +360,109 @@
 - **URL**: `/api/nofly/zones`
 - **方法**: GET
 - **参数**:
-  - `zoneType`: 区域类型（可选）
-  - `restrict`: 限制类型（可选）
-- **返回**: GeoJSON FeatureCollection
+  - `zoneType`: 区域类型（可选，模糊匹配 zone_name）
+  - `restrict`: 限制类型（可选，精确匹配）
+  - `lang`: 语言（可选，默认 `zh`），可选值：`zh` / `en`
+- **响应**:
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "type": "FeatureCollection",
+    "features": [
+      {
+        "type": "Feature",
+        "properties": {
+          "id": "17",
+          "bid": "17",
+          "zone_id": "D_PMD003",
+          "zone_name": "Class D - PMD",
+          "restriction": "管制空域",
+          "note": "有效期：2026年1月1日-2026年12月31日...",
+          "flight_ceiling": 0,
+          "height_meters": 0,
+          "zone_category": "限飞区",
+          "area": 214.36
+        },
+        "geometry": { "type": "Polygon", "coordinates": [...] }
+      }
+    ]
+  },
+  "count": 32
+}
+```
 
-### 2. 获取单个禁飞区详情
+### 2. 获取禁飞区面积
+- **URL**: `/api/nofly/area`
+- **方法**: GET
+- **参数**:
+  - `zoneCategory`: 区域类型（可选），可选值：`no-fly` / `restricted`
+- **响应**:
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "area_km2": "4889.32"
+  }
+}
+```
+
+### 3. 获取单个禁飞区详情
 - **URL**: `/api/nofly/:zoneId`
 - **方法**: GET
+- **说明**: 根据 `zone_id` 查询禁飞区详情
 
 ---
 
-## 七、管理员接口 (/api/admin)
+## 七、用户查询记录接口 (/api/userdata)
+
+> 需要登录，用户只能操作自己的记录
+
+### 1. 保存查询记录
+- **URL**: `/api/userdata/save`
+- **方法**: POST
+- **请求体**:
+```json
+{
+  "query_type": "point-query",
+  "query_params": { "lng": -118.208, "lat": 34.08 },
+  "result_count": 1,
+  "result_data": { ... }
+}
+```
+- **参数说明**:
+  - `query_type`: 查询类型，可选值：
+    - `point-query`: 点选建筑查询
+    - `takeoff-filter`: 起降点分析
+    - `route-check`: 航线碰撞检测
+    - `nofly-zones`: 禁飞区查询
+  - `query_params`: 查询参数（JSON 对象）
+  - `result_count`: 结果数量
+  - `result_data`: 查询结果数据（JSON 对象，可选）
+- **注意**: `user_id` 从登录 token 中自动获取，不需要传
+
+### 2. 获取查询记录列表
+- **URL**: `/api/userdata/list`
+- **方法**: GET
+- **参数**:
+  - `query_type`: 查询类型（可选，筛选）
+  - `page`: 页码（默认 1）
+  - `pageSize`: 每页数量（默认 20）
+- **示例**: `/api/userdata/list?page=1&pageSize=10&query_type=point-query`
+
+### 3. 获取单条记录详情
+- **URL**: `/api/userdata/detail/:recordId`
+- **方法**: GET
+
+### 4. 删除查询记录
+- **URL**: `/api/userdata/delete/:recordId`
+- **方法**: DELETE
+
+---
+
+## 八、管理员接口 (/api/admin)
 
 > 所有接口需要管理员权限（role = admin）
 
@@ -356,7 +536,7 @@
 
 ---
 
-## 八、角色权限说明
+## 九、角色权限说明
 
 | 角色 | 等级 | 权限 |
 |------|------|------|
@@ -368,7 +548,7 @@
 
 ---
 
-## 九、测试用户账号
+## 十、测试用户账号
 
 | 用户名 | 密码 | 角色 |
 |--------|------|------|
@@ -379,7 +559,7 @@
 
 ---
 
-## 十、错误码说明
+## 十一、错误码说明
 
 | 状态码 | code | 说明 |
 |--------|------|------|
@@ -393,14 +573,14 @@
 
 ---
 
-## 十一、数据库表结构
+## 十二、数据库表结构
 
 ### users 用户表
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | id | SERIAL | 主键 |
 | username | VARCHAR(50) | 用户名 |
-| password | VARCHAR(255) | 密码 |
+| password | VARCHAR(255) | 密码（bcrypt加密） |
 | email | VARCHAR(100) | 邮箱 |
 | phone | VARCHAR(20) | 手机号 |
 | role | VARCHAR(20) | 角色 |
@@ -419,3 +599,49 @@
 | result_count | INTEGER | 结果数量 |
 | result_data | TEXT | 结果数据(JSON) |
 | created_at | TIMESTAMP | 创建时间 |
+
+### la_building 建筑表
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | SERIAL | 主键 |
+| bid | VARCHAR(50) | 建筑编号 |
+| height | NUMERIC | 建筑高度（米） |
+| area_m2 | NUMERIC | 建筑面积（平方米） |
+| confidence | INTEGER | 置信度 |
+| geom | GEOMETRY | 几何形状（Polygon） |
+
+### nofly_zone 禁飞区表
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | SERIAL | 主键 |
+| bid | VARCHAR(50) | 区域编号 |
+| zone_id | VARCHAR(50) | 禁飞区ID |
+| zone_name | VARCHAR(100) | 区域名称 |
+| restrict | VARCHAR(100) | 限制类型 |
+| note | TEXT | 备注说明（格式：英文 \| 中文） |
+| flight_cei | NUMERIC | 飞行上限高度 |
+| height_met | NUMERIC | 高度（米） |
+| area | TEXT | 面积（平方公里） |
+| geom | GEOMETRY | 几何形状（Polygon） |
+
+---
+
+## 十三、数据导入说明
+
+### 禁飞区数据导入
+```bash
+cd backend
+node scripts/import-geojson.js
+```
+
+### Note字段翻译更新
+```bash
+cd backend
+node scripts/update-note-translation.js
+```
+
+---
+
+## 十四、前端对接指南
+
+详细前端对接说明请参考：[FRONTEND_GUIDE.md](./FRONTEND_GUIDE.md)

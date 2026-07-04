@@ -1,7 +1,8 @@
 const { Pool } = require("pg");
 const config = require("../config/db");
 
-const pool = new Pool(config.development);
+const env = process.env.NODE_ENV || "development";
+const pool = new Pool(config[env]);
 
 const query = async (text, params) => {
   const start = Date.now();

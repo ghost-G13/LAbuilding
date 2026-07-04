@@ -2,6 +2,7 @@
 import { onMounted, onBeforeUnmount, ref, watch, defineExpose, computed } from 'vue'
 import * as Cesium from 'cesium'
 import 'cesium/Build/Cesium/Widgets/widgets.css'
+import axios from 'axios'
 
 const props = defineProps({
   currentLanguage: {
@@ -50,7 +51,7 @@ const i18n = {
 const t = computed(() => i18n[props.currentLanguage] || i18n['zh-CN'])
 
 const BUILDING_API_URL = '/api/public/buildings'
-const NO_FLY_ZONE_API_URL = '/api/nofly/zones'
+const NO_FLY_ZONE_API_URL = '/api/public/nofly-zones'
 
 const cesiumContainer = ref(null)
 const buildingLoadingText = ref('建筑白模：正在从服务器获取数据...')
@@ -150,8 +151,8 @@ async function loadBuildingWhiteModel(params = {}) {
       pageSize
     })
     
-    let response = await fetch(`${BUILDING_API_URL}?${urlParams.toString()}`)
-    let result = await response.json()
+    const response = await axios.get(`${BUILDING_API_URL}?${urlParams.toString()}`)
+    let result = response.data
 
     if (result.code !== 0) {
       throw new Error(result.message || '获取建筑数据失败')
@@ -182,8 +183,8 @@ async function loadBuildingWhiteModel(params = {}) {
       currentPage++
       if (currentPage <= Math.ceil(result.total / pageSize)) {
         urlParams.set('page', currentPage)
-        response = await fetch(`${BUILDING_API_URL}?${urlParams.toString()}`)
-        result = await response.json()
+        const res = await axios.get(`${BUILDING_API_URL}?${urlParams.toString()}`)
+        result = res.data
         
         if (result.code !== 0) {
           break
@@ -265,35 +266,60 @@ function clearBuildingDataSources() {
 
 
 async function loadNoFlyZone() {
+  console.log('[CESIUM-NOFLY] ======== 开始加载禁飞区数据 ========')
+  
   if (noFlyZoneDataSource) {
+    console.log('[CESIUM-NOFLY] 数据源已存在，直接添加到viewer')
     viewer.dataSources.add(noFlyZoneDataSource)
     return
   }
+  
   try {
     const langParam = props.currentLanguage === 'en' ? 'en' : 'zh'
-    const response = await fetch(`${NO_FLY_ZONE_API_URL}?lang=${langParam}`)
-    const result = await response.json()
-
+    console.log('[CESIUM-NOFLY] 语言参数:', langParam)
+    console.log('[CESIUM-NOFLY] 请求URL:', `${NO_FLY_ZONE_API_URL}?lang=${langParam}`)
+    
+    const response = await axios.get(`${NO_FLY_ZONE_API_URL}?lang=${langParam}`)
+    console.log('[CESIUM-NOFLY] HTTP响应状态:', response.status)
+    
+    const result = response.data
+    console.log('[CESIUM-NOFLY] API返回数据:', JSON.stringify(result))
+    
     if (result.code !== 0) {
       throw new Error(result.message || '获取禁飞区数据失败')
     }
 
     const geojsonData = result.data
+    console.log('[CESIUM-NOFLY] GeoJSON数据类型:', typeof geojsonData)
+    console.log('[CESIUM-NOFLY] features数量:', geojsonData?.features?.length || 0)
+    
+    if (geojsonData?.features && geojsonData.features.length > 0) {
+      console.log('[CESIUM-NOFLY] 第一个feature的properties:', JSON.stringify(geojsonData.features[0].properties))
+      console.log('[CESIUM-NOFLY] 第一个feature的area值:', geojsonData.features[0].properties?.area)
+    }
+
     noFlyZoneDataSource = await Cesium.GeoJsonDataSource.load(geojsonData)
     noFlyZoneDataSource.show = false
+    
+    let entityCount = 0
     for (const entity of noFlyZoneDataSource.entities.values) {
+      entityCount++
       if (entity.polygon) {
-        entity.polygon.height = 0
-        entity.polygon.extrudedHeight = 100
+        entity.polygon.height = 300
+        entity.polygon.extrudedHeight = 350
         entity.polygon.material = Cesium.Color.fromCssColorString('rgba(229, 57, 53, 0.4)')
         entity.polygon.outline = true
         entity.polygon.outlineColor = Cesium.Color.fromCssColorString('rgba(229, 57, 53, 0.8)')
+        entity.polygon.depthTest = false
       }
+      console.log('[CESIUM-NOFLY] Entity', entityCount, '- name:', entity.name, '- properties.area:', entity.properties?.area?.getValue?.())
     }
+    
     viewer.dataSources.add(noFlyZoneDataSource)
-    console.log('禁飞区数据加载成功（来自服务器）')
+    console.log('[CESIUM-NOFLY] 禁飞区数据加载成功（来自服务器），共', entityCount, '个实体')
+    console.log('[CESIUM-NOFLY] ======== 禁飞区数据加载结束 ========')
   } catch (error) {
-    console.error('加载禁飞区数据失败：', error)
+    console.error('[CESIUM-NOFLY] ❌ 加载禁飞区数据失败：', error)
   }
 }
 
@@ -701,13 +727,22 @@ function getEntityArea(entity) {
   const p = entity.properties
   if (!p) return 0
   
-  if (p.area !== undefined && p.area !== null) {
-    const num = Number(p.area)
+  const getPropValue = (prop) => {
+    if (prop === undefined || prop === null) return undefined
+    if (typeof prop.getValue === 'function') {
+      return prop.getValue()
+    }
+    return prop
+  }
+  
+  const areaVal = getPropValue(p.area)
+  if (areaVal !== undefined && areaVal !== null) {
+    const num = Number(areaVal)
     return isNaN(num) ? 0 : num
   }
   
   if (areaField) {
-    const val = p[areaField]
+    const val = getPropValue(p[areaField])
     if (val !== undefined && val !== null) {
       const num = Number(val)
       return isNaN(num) ? 0 : num
@@ -716,7 +751,7 @@ function getEntityArea(entity) {
   
   const areaFields = ['area_m2', 'AREA', 'Area', 'building_area', 'area_m']
   for (const field of areaFields) {
-    const val = p[field]
+    const val = getPropValue(p[field])
     if (val !== undefined && val !== null) {
       const num = Number(val)
       return isNaN(num) ? 0 : num
@@ -1003,6 +1038,7 @@ function setupBuildingClickHandler() {
     clearBuildingSelection()
     
     if (noFlyZoneDataSource && noFlyZoneDataSource.entities.contains(entity)) {
+      console.log('[CESIUM-CLICK] ======== 点击禁飞区 ========')
       selectedNoFlyZone = entity
       
       const highlightColor = Cesium.Color.fromCssColorString('rgba(255, 193, 7, 0.6)')
@@ -1013,7 +1049,16 @@ function setupBuildingClickHandler() {
       selectedNoFlyZone.polygon.outlineWidth = 4
       
       const name = entity.properties?.zone_name?.getValue() || (props.currentLanguage === 'en' ? 'Unnamed No-Fly Zone' : '未命名禁飞区')
-      const area = Number(entity.properties?.area?.getValue()) || getEntityArea(entity)
+      console.log('[CESIUM-CLICK] 禁飞区名称:', name)
+      
+      const areaFromProps = entity.properties?.area?.getValue()
+      console.log('[CESIUM-CLICK] 从properties获取area:', areaFromProps, '类型:', typeof areaFromProps)
+      
+      const area = Number(areaFromProps) || getEntityArea(entity)
+      console.log('[CESIUM-CLICK] Number转换后area:', area)
+      console.log('[CESIUM-CLICK] getEntityArea(entity)结果:', getEntityArea(entity))
+      console.log('[CESIUM-CLICK] 最终area值:', area)
+      console.log('[CESIUM-CLICK] ======== 点击禁飞区结束 ========')
       const rawNote = entity.properties?.note?.getValue() || ''
       
       let note = ''

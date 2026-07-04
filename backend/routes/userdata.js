@@ -63,7 +63,8 @@ router.get("/list", async (req, res) => {
     const total = parseInt(countResult.rows[0].total);
 
     const start = (Number(page) - 1) * Number(pageSize);
-    sql += ` ORDER BY created_at DESC OFFSET ${start} LIMIT ${pageSize}`;
+    params.push(start, Number(pageSize));
+    sql += ` ORDER BY created_at DESC OFFSET $${params.length - 1} LIMIT $${params.length}`;
 
     const result = await query(sql, params);
 

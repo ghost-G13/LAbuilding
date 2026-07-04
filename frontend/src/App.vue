@@ -1,6 +1,6 @@
 <script setup>
 import { ref, watch, onMounted, computed } from 'vue'
-import { login, register, sendCode, getCaptcha } from './utils/request'
+import { login, register, sendCode, getCaptcha, forgotPassword, resetPassword, getNoFlyZoneArea, getBuildings } from './utils/request'
 
 const isNavCompact = ref(false)
 
@@ -38,7 +38,51 @@ const isCheckingCollision = ref(false)
 const noFlyZoneLayer = ref(false)
 const colorLayer = ref(false)
 
-const noFlyZoneArea = computed(() => `1,256.8 ${t.value.hectare}`)
+const noFlyZoneArea = ref('')
+
+const fetchNoFlyZoneArea = async () => {
+  try {
+    console.log('[APP-FETCH-AREA] ======== 开始获取禁飞区面积 ========')
+    console.log('[APP-FETCH-AREA] 调用getNoFlyZoneArea，参数: {}')
+    
+    const data = await getNoFlyZoneArea({})
+    
+    console.log('[APP-FETCH-AREA] 获取到数据:', JSON.stringify(data))
+    console.log('[APP-FETCH-AREA] data.code:', data.code)
+    console.log('[APP-FETCH-AREA] data.data:', data.data)
+    
+    let areaKm2 = 0
+    
+    if (data.code === 0 && data.data) {
+      console.log('[APP-FETCH-AREA] data.data.area_km2:', data.data.area_km2)
+      console.log('[APP-FETCH-AREA] data.data.area_m2:', data.data.area_m2)
+      console.log('[APP-FETCH-AREA] data.data.area_hectares:', data.data.area_hectares)
+      
+      if (data.data.area_km2 !== undefined) {
+        areaKm2 = parseFloat(data.data.area_km2)
+        console.log('[APP-FETCH-AREA] 使用新格式 area_km2:', areaKm2)
+      } else if (data.data.area_hectares !== undefined) {
+        areaKm2 = parseFloat(data.data.area_hectares) / 100
+        console.log('[APP-FETCH-AREA] 使用旧格式 area_hectares，转换后:', areaKm2)
+      } else if (data.data.area_m2 !== undefined) {
+        areaKm2 = parseFloat(data.data.area_m2) / 1000000
+        console.log('[APP-FETCH-AREA] 使用旧格式 area_m2，转换后:', areaKm2)
+      }
+      
+      console.log('[APP-FETCH-AREA] isNaN(areaKm2):', isNaN(areaKm2))
+      noFlyZoneArea.value = isNaN(areaKm2) || areaKm2 <= 0 ? '0 km²' : `${areaKm2.toLocaleString()} km²`
+    } else {
+      console.log('[APP-FETCH-AREA] 条件不满足，设置为0 km²')
+      noFlyZoneArea.value = '0 km²'
+    }
+    
+    console.log('[APP-FETCH-AREA] 最终noFlyZoneArea:', noFlyZoneArea.value)
+    console.log('[APP-FETCH-AREA] ======== 获取禁飞区面积结束 ========')
+  } catch (error) {
+    console.error('[APP-FETCH-AREA] ❌ 错误:', error)
+    noFlyZoneArea.value = '0 km²'
+  }
+}
 
 const showLoginModal = ref(false)
 const isRegisterMode = ref(false)
@@ -217,6 +261,84 @@ const handleLogout = () => {
   alert(t.value.loggedOut || 'Logged out successfully')
 }
 
+const isForgotPasswordMode = ref(false)
+const forgotPasswordEmail = ref('')
+const forgotPasswordCode = ref('')
+const forgotPasswordNewPassword = ref('')
+const forgotPasswordConfirmPassword = ref('')
+const forgotPasswordError = ref('')
+const forgotPasswordTimer = ref(0)
+
+const toggleForgotPassword = () => {
+  isForgotPasswordMode.value = !isForgotPasswordMode.value
+  isRegisterMode.value = false
+  loginError.value = ''
+  forgotPasswordError.value = ''
+}
+
+const startTimer = () => {
+  forgotPasswordTimer.value = 60
+  const timer = setInterval(() => {
+    forgotPasswordTimer.value--
+    if (forgotPasswordTimer.value <= 0) {
+      clearInterval(timer)
+    }
+  }, 1000)
+}
+
+const handleSendForgotCode = async () => {
+  if (!forgotPasswordEmail.value.trim()) {
+    forgotPasswordError.value = t.value.enterEmail || 'Enter email'
+    return
+  }
+  
+  try {
+    const data = await forgotPassword({ email: forgotPasswordEmail.value.trim() })
+    if (data.code === 0) {
+      startTimer()
+      alert(t.value.codeSentSuccess || 'Verification code sent to email')
+    } else {
+      forgotPasswordError.value = data.message
+    }
+  } catch (error) {
+    forgotPasswordError.value = error.message || 'Failed to send verification code'
+  }
+}
+
+const handleResetPassword = async () => {
+  if (!forgotPasswordEmail.value.trim() || !forgotPasswordCode.value || !forgotPasswordNewPassword.value || !forgotPasswordConfirmPassword.value) {
+    forgotPasswordError.value = '请填写完整信息'
+    return
+  }
+  
+  if (forgotPasswordNewPassword.value !== forgotPasswordConfirmPassword.value) {
+    forgotPasswordError.value = t.value.passwordMismatch || 'Passwords do not match'
+    return
+  }
+  
+  try {
+    const data = await resetPassword({
+      email: forgotPasswordEmail.value.trim(),
+      code: forgotPasswordCode.value,
+      newPassword: forgotPasswordNewPassword.value
+    })
+    
+    if (data.code === 0) {
+      alert(t.value.passwordResetSuccess || 'Password reset successful, please login')
+      closeLogin()
+      isForgotPasswordMode.value = false
+      forgotPasswordEmail.value = ''
+      forgotPasswordCode.value = ''
+      forgotPasswordNewPassword.value = ''
+      forgotPasswordConfirmPassword.value = ''
+    } else {
+      forgotPasswordError.value = data.message
+    }
+  } catch (error) {
+    forgotPasswordError.value = error.message || 'Failed to reset password'
+  }
+}
+
 const toggleRegister = () => {
   isRegisterMode.value = !isRegisterMode.value
   loginError.value = ''
@@ -283,7 +405,7 @@ const i18n = {
     inputComplete: '请输入以上相关信息！',
     clickFilter: '输入完成，请点击筛选',
     filtering: '筛选中...',
-    filteredResult: '已筛选出符合条件的起降点位：共',
+    filteredResult: '已筛选出符合条件的选址数量：共',
     clearFilter: '清除筛选',
     clearDrawing: '清除绘制',
     filter: '筛选',
@@ -389,7 +511,21 @@ const i18n = {
     privacyArticleThreeContent: '用户个人账号信息、低空业务数据存储于加密PostGIS数据库，数据库配置访问权限校验、定期数据备份、GIST索引加密防护，防止空间矢量数据、个人信息泄露、篡改。系统设置访问日志审计机制，记录所有后台数据调取行为，全程可追溯。个人信息存储期限至账号注销后1年，到期自动彻底删除；低空空域业务记录按行业监管要求留存3年，到期脱敏销毁。',
     privacyArticleFourContent: '用户有权登录账号查看、修改个人注册信息，可申请导出自身所有航线、起降点分析记录；若认为个人信息存在错误、泄露风险，可联系运营方申请更正、防护处理；用户申请注销账号后，平台将清除手机号、用户名等可识别个人信息。用户若不同意本隐私政策，可停止注册、放弃使用本系统全部功能。',
     privacyArticleFiveContent: '运营方会根据个人信息保护法规、低空数据管理要求适时更新本隐私政策，更新后将在注册、登录弹窗公示，用户继续使用系统即代表认可更新后的条款。若对隐私政策存在疑问，可通过平台预留渠道联系运营方咨询。',
-    termsDate: '2026年7月1日'
+    termsDate: '2026年7月1日',
+    forgotPasswordTitle: '找回密码',
+    forgotPasswordHint: '请输入您的注册邮箱',
+    enterEmail: '请输入邮箱',
+    submitEmail: '提交',
+    resetPasswordTitle: '重置密码',
+    resetPasswordHint: '请设置新密码',
+    enterCode: '请输入验证码',
+    newPassword: '新密码',
+    confirmNewPassword: '确认新密码',
+    resetPassword: '重置密码',
+    codeSentSuccess: '验证码已发送到邮箱',
+    passwordResetSuccess: '密码重置成功，请登录',
+    emailNotRegistered: '该邮箱未注册',
+    codeError: '验证码错误或已过期'
   },
   'en': {
     title: 'Urban Low-Altitude 3D Building Visualization & Analysis System',
@@ -406,7 +542,7 @@ const i18n = {
     inputComplete: 'Please enter all required information!',
     clickFilter: 'Input complete, click to filter',
     filtering: 'Filtering...',
-    filteredResult: 'Filtered takeoff points:',
+    filteredResult: 'Filtered site selection count:',
     clearFilter: 'Clear Filter',
     clearDrawing: 'Clear Drawing',
     filter: 'Filter',
@@ -512,7 +648,21 @@ const i18n = {
     privacyArticleThreeContent: 'User personal account information and low-altitude business data are stored in an encrypted PostGIS database. The database is configured with access permission verification, regular data backup, and GIST index encryption protection to prevent spatial vector data and personal information from being leaked or tampered with. The system has an access log audit mechanism that records all backend data access activities and is fully traceable. Personal information is stored for 1 year after account cancellation and is automatically and completely deleted upon expiration. Low-altitude airspace business records are retained for 3 years in accordance with industry regulatory requirements and are desensitized and destroyed upon expiration.',
     privacyArticleFourContent: 'Users have the right to log in to their accounts to view and modify personal registration information and can apply to export all their route and takeoff/landing point analysis records. If users believe their personal information contains errors or has a risk of leakage, they can contact the operator to request correction or protection measures. After a user applies for account cancellation, the platform will clear identifiable personal information such as phone numbers and usernames. If users do not agree with this privacy policy, they may stop registration and abandon all system functions.',
     privacyArticleFiveContent: 'The operator will update this privacy policy from time to time in accordance with personal information protection regulations and low-altitude data management requirements. After updates, the policy will be displayed in registration and login pop-ups. Continued use of the system by users shall be deemed recognition of the updated terms. If users have questions about the privacy policy, they can contact the operator through the reserved channels.',
-    termsDate: 'July 1, 2026'
+    termsDate: 'July 1, 2026',
+    forgotPasswordTitle: 'Forgot Password',
+    forgotPasswordHint: 'Enter your registered email',
+    enterEmail: 'Enter email',
+    submitEmail: 'Submit',
+    resetPasswordTitle: 'Reset Password',
+    resetPasswordHint: 'Set your new password',
+    enterCode: 'Enter verification code',
+    newPassword: 'New Password',
+    confirmNewPassword: 'Confirm New Password',
+    resetPassword: 'Reset Password',
+    codeSentSuccess: 'Verification code sent to email',
+    passwordResetSuccess: 'Password reset successful, please login',
+    emailNotRegistered: 'Email not registered',
+    codeError: 'Verification code error or expired'
   }
 }
 
@@ -583,6 +733,11 @@ const applySettings = () => {
 const filterTakeoffPoints = async () => {
   if (!isInputComplete.value) return
   
+  if (!isLoggedIn.value) {
+    showLoginModal.value = true
+    return
+  }
+  
   const minH = parseFloat(flightHeightMin.value)
   const maxH = parseFloat(flightHeightMax.value)
   const minA = parseFloat(areaMin.value)
@@ -593,11 +748,10 @@ const filterTakeoffPoints = async () => {
   filteredData.value = []
   
   try {
-    const response = await fetch(`/api/public/buildings?minHeight=${minH}&maxHeight=${maxH}&minArea=${minA}&maxArea=${maxA}&page=1&pageSize=1`)
-    const result = await response.json()
+    const result = await getBuildings({ minHeight: minH, maxHeight: maxH, minArea: minA, maxArea: maxA, page: 1, pageSize: 1 })
     
     if (result.code === 0) {
-      filteredCount.value = result.total
+      filteredCount.value = result.pagination?.total || result.total
       
       if (window.filterBuildings) {
         window.filterCallback = (callbackResult) => {
@@ -641,7 +795,7 @@ const exportResults = () => {
   const link = document.createElement('a')
   const url = URL.createObjectURL(blob)
   link.setAttribute('href', url)
-  const filename = currentLanguage.value === 'en' ? `Takeoff_Analysis_Results_${new Date().toISOString().slice(0, 10)}.csv` : `起降点分析结果_${new Date().toISOString().slice(0, 10)}.csv`
+  const filename = currentLanguage.value === 'en' ? `Low_Altitude_Site_Selection_${new Date().toISOString().slice(0, 10)}.csv` : `低空选址筛选_${new Date().toISOString().slice(0, 10)}.csv`
   link.setAttribute('download', filename)
   link.style.visibility = 'hidden'
   document.body.appendChild(link)
@@ -679,6 +833,11 @@ window.onDrawComplete = () => {
 
 function checkCollision() {
   if (!isDrawn.value) return
+  
+  if (!isLoggedIn.value) {
+    showLoginModal.value = true
+    return
+  }
   
   const minH = parseFloat(collisionHeightMin.value) || 0
   const maxH = parseFloat(collisionHeightMax.value) || 0
@@ -721,6 +880,8 @@ onMounted(() => {
     window.setNoFlyZoneLayer(noFlyZoneLayer.value)
   }
   
+  fetchNoFlyZoneArea()
+  
   const storedUser = localStorage.getItem('user')
   if (storedUser) {
     try {
@@ -734,6 +895,12 @@ onMounted(() => {
       localStorage.removeItem('user')
     }
   }
+  
+  window.addEventListener('auth-logout', () => {
+    isLoggedIn.value = false
+    loggedInUser.value = null
+    console.log('Token expired, logged out')
+  })
 })
 </script>
 
@@ -897,7 +1064,7 @@ onMounted(() => {
       </div>
       
       <div class="footer-note">
-        <p>{{ t.coordinateRange }}：{{ currentLanguage === 'en' ? 'Lon 116.00° - 116.50°, Lat 39.70° - 40.10°' : 'E 116.00° - 116.50°, N 39.70° - 40.10°' }}</p>
+        <p>{{ t.coordinateRange }}：{{ currentLanguage === 'en' ? 'Lon -118.50° - -118.20°, Lat 33.70° - 34.00°' : 'W 118.50° - 118.20°, N 33.70° - 34.00°' }}</p>
       </div>
     </div>
     
@@ -905,14 +1072,14 @@ onMounted(() => {
       <div class="modal-container">
         <div class="modal-header">
           <div class="modal-title-area">
-            <h2>{{ isRegisterMode ? t.newUserRegister : t.loginAccount }}</h2>
-            <p class="modal-subtitle">{{ isRegisterMode ? t.registerHint : t.loginHint }}</p>
+            <h2>{{ isForgotPasswordMode ? t.forgotPasswordTitle : (isRegisterMode ? t.newUserRegister : t.loginAccount) }}</h2>
+            <p class="modal-subtitle">{{ isForgotPasswordMode ? t.forgotPasswordHint : (isRegisterMode ? t.registerHint : t.loginHint) }}</p>
           </div>
           <button class="modal-close" @click="closeLogin">×</button>
         </div>
         
         <div class="modal-body" :class="{ 'register-mode': isRegisterMode }">
-          <form v-if="!isRegisterMode" @submit.prevent="handleLogin" class="login-form">
+          <form v-if="!isRegisterMode && !isForgotPasswordMode" @submit.prevent="handleLogin" class="login-form">
             <div class="form-group">
               <div class="input-wrapper">
                 <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -960,7 +1127,7 @@ onMounted(() => {
                 <input type="checkbox" v-model="loginForm.rememberAccount">
                 <span>{{ t.rememberAccount || 'Remember Account' }}</span>
               </label>
-              <a href="#" class="forgot-link">{{ t.forgotPassword || 'Forgot Password?' }}</a>
+              <a href="#" class="forgot-link" @click.prevent="toggleForgotPassword">{{ t.forgotPassword || 'Forgot Password?' }}</a>
             </div>
             
             <span v-if="loginError" class="form-error">{{ loginError }}</span>
@@ -975,7 +1142,7 @@ onMounted(() => {
             </p>
           </form>
           
-          <form v-else @submit.prevent="handleRegister" class="register-form">
+          <form v-if="isRegisterMode" @submit.prevent="handleRegister" class="register-form">
             <div class="form-group">
               <div class="input-wrapper">
                 <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1078,6 +1245,58 @@ onMounted(() => {
             
             <p class="toggle-link">
               {{ t.registerHint }} <a href="#" @click.prevent="toggleRegister"><span style="color: #0066ff">{{ t.backToLogin }}</span></a>
+            </p>
+          </form>
+          
+          <form v-if="isForgotPasswordMode" @submit.prevent="handleResetPassword" class="forgot-password-form">
+            <div class="form-group">
+              <div class="input-wrapper">
+                <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+                  <polyline points="22,6 12,13 2,6"></polyline>
+                </svg>
+                <input type="email" v-model="forgotPasswordEmail" :placeholder="t.email" class="modal-input">
+              </div>
+            </div>
+            
+            <div class="form-group">
+              <div class="input-wrapper captcha-wrapper">
+                <input type="text" v-model="forgotPasswordCode" :placeholder="t.enterCode" class="modal-input captcha-input">
+                <button type="button" class="captcha-btn" @click="handleSendForgotCode" :disabled="forgotPasswordTimer > 0">
+                  {{ forgotPasswordTimer > 0 ? `${t.resend} (${forgotPasswordTimer}s)` : t.getCaptcha }}
+                </button>
+              </div>
+            </div>
+            
+            <div class="form-group">
+              <div class="input-wrapper">
+                <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                </svg>
+                <input type="password" v-model="forgotPasswordNewPassword" :placeholder="t.newPassword" class="modal-input">
+              </div>
+            </div>
+            
+            <div class="form-group">
+              <div class="input-wrapper">
+                <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                </svg>
+                <input type="password" v-model="forgotPasswordConfirmPassword" :placeholder="t.confirmNewPassword" class="modal-input">
+              </div>
+              <span v-if="forgotPasswordConfirmPassword && forgotPasswordNewPassword !== forgotPasswordConfirmPassword" class="input-error">{{ t.passwordMismatch }}</span>
+            </div>
+            
+            <span v-if="forgotPasswordError" class="form-error">{{ forgotPasswordError }}</span>
+            
+            <button type="submit" class="submit-btn">
+              {{ t.resetPassword }}
+            </button>
+            
+            <p class="toggle-link">
+              {{ t.loginHint }} <a href="#" @click.prevent="toggleForgotPassword"><span style="color: #0066ff">{{ t.backToLogin }}</span></a>
             </p>
           </form>
         </div>
@@ -1962,7 +2181,8 @@ html, body, #app {
 .form-group {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 12px;
+  margin-bottom: 8px;
 }
 
 .input-wrapper {

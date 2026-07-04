@@ -13,7 +13,7 @@ const transporter = nodemailer.createTransport({
 async function sendVerificationCode(email, code) {
   if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
     console.warn("[邮件] 未配置邮箱，验证码仅输出到控制台:", code);
-    return { success: true, message: "验证码已发送到控制台", consoleCode: code };
+    return { success: false, message: "邮箱未配置，请联系管理员", consoleCode: code };
   }
 
   try {
@@ -64,4 +64,8 @@ async function sendVerificationCode(email, code) {
   }
 }
 
-module.exports = { sendVerificationCode };
+function isEmailConfigured() {
+  return !!process.env.EMAIL_USER && !!process.env.EMAIL_PASS;
+}
+
+module.exports = { sendVerificationCode, isEmailConfigured };

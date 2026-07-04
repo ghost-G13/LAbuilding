@@ -2,10 +2,10 @@ const express = require("express");
 const router = express.Router();
 const { query } = require("../utils/db");
 const redis = require("../utils/redis");
-const { generateToken } = require("../middleware/auth");
+const { generateToken, authMiddleware } = require("../middleware/auth");
 const svgCaptcha = require("svg-captcha");
 const bcrypt = require("bcryptjs");
-const { sendVerificationCode } = require("../utils/mail");
+const { sendVerificationCode, isEmailConfigured } = require("../utils/mail");
 
 const generateCode = (length = 6) => {
   return Math.floor(Math.random() * Math.pow(10, length)).toString().padStart(length, "0");
@@ -33,7 +33,7 @@ router.post("/send-code", async (req, res) => {
       });
     }
 
-    const rateLimitKey = `sms:limit:${email}`;
+    const rateLimitKey = `email:limit:${email}`;
     const lastSent = await redis.get(rateLimitKey);
 
     if (lastSent) {
@@ -45,7 +45,7 @@ router.post("/send-code", async (req, res) => {
     }
 
     const code = generateCode(6);
-    const codeKey = `sms:code:${email}`;
+    const codeKey = `email:code:${email}`;
     await redis.set(codeKey, code, 300);
     await redis.set(rateLimitKey, Date.now().toString(), 60);
 
@@ -62,13 +62,26 @@ router.post("/send-code", async (req, res) => {
         },
       });
     } else {
-      await redis.del(codeKey);
-      await redis.del(rateLimitKey);
-      res.status(500).json({
-        code: 500,
-        message: mailResult.message,
-        error: mailResult.error,
-      });
+      if (!isEmailConfigured()) {
+        console.log(`[验证码] ${email}: ${code} (邮箱未配置，验证码已输出到控制台)`);
+        res.json({
+          code: 0,
+          message: "邮箱未配置，验证码已输出到服务器控制台，请查看后端日志获取验证码",
+          data: {
+            email,
+            expires_in: 300,
+            console_code: true,
+          },
+        });
+      } else {
+        await redis.del(codeKey);
+        await redis.del(rateLimitKey);
+        res.status(500).json({
+          code: 500,
+          message: mailResult.message,
+          error: mailResult.error,
+        });
+      }
     }
   } catch (error) {
     console.error("Send code error:", error);
@@ -101,7 +114,6 @@ router.get("/captcha", async (req, res) => {
         image: captcha.data,
         captcha_key: captchaKey,
         expires_in: 120,
-        text: captcha.text,
       },
     });
   } catch (error) {
@@ -115,7 +127,7 @@ router.get("/captcha", async (req, res) => {
 
 router.post("/register", async (req, res) => {
   try {
-    const { username, password, email, code, role } = req.body;
+    const { username, password, email, code } = req.body;
 
     if (!username || !password || !email || !code) {
       return res.status(400).json({
@@ -131,7 +143,7 @@ router.post("/register", async (req, res) => {
       });
     }
 
-    const codeKey = `sms:code:${email}`;
+    const codeKey = `email:code:${email}`;
     const storedCode = await redis.get(codeKey);
 
     if (!storedCode) {
@@ -177,8 +189,8 @@ router.post("/register", async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, 10);
 
     const result = await query(
-      "INSERT INTO users (username, password, email, email_verified, role) VALUES ($1, $2, $3, true, $4) RETURNING id, username, email, role, created_at",
-      [username, hashedPassword, email, role || "user"]
+      "INSERT INTO users (username, password, email, email_verified, role) VALUES ($1, $2, $3, true, 'user') RETURNING id, username, email, role, created_at",
+      [username, hashedPassword, email]
     );
 
     res.json({
@@ -267,12 +279,14 @@ router.post("/login", async (req, res) => {
     );
 
     const token = generateToken(result.rows[0].id, result.rows[0].role);
+    const userSafe = { ...result.rows[0] };
+    delete userSafe.password;
 
     res.json({
       code: 0,
       message: "登录成功",
       data: {
-        ...result.rows[0],
+        ...userSafe,
         token,
       },
     });
@@ -286,9 +300,16 @@ router.post("/login", async (req, res) => {
   }
 });
 
-router.get("/info/:userId", async (req, res) => {
+router.get("/info/:userId", authMiddleware, async (req, res) => {
   try {
     const { userId } = req.params;
+
+    if (req.user.role !== "admin" && parseInt(req.user.id) !== parseInt(userId)) {
+      return res.status(403).json({
+        code: 403,
+        message: "无权访问",
+      });
+    }
 
     const result = await query(
       "SELECT id, username, email, phone, role, email_verified, phone_verified, created_at, last_login FROM users WHERE id = $1",
@@ -309,6 +330,129 @@ router.get("/info/:userId", async (req, res) => {
     });
   } catch (error) {
     console.error("Get user info error:", error);
+    res.status(500).json({
+      code: 500,
+      message: "获取用户信息失败",
+    });
+  }
+});
+
+router.post("/forgot-password", async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email || !isEmail(email)) {
+      return res.status(400).json({
+        code: 400,
+        message: "请输入有效的邮箱地址",
+      });
+    }
+
+    const userResult = await query(
+      "SELECT id, email FROM users WHERE email = $1",
+      [email]
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({
+        code: 404,
+        message: "该邮箱未注册",
+      });
+    }
+
+    const rateLimitKey = `email:limit:${email}`;
+    const lastSent = await redis.get(rateLimitKey);
+
+    if (lastSent) {
+      const remaining = 60 - Math.floor((Date.now() - parseInt(lastSent)) / 1000);
+      return res.status(429).json({
+        code: 429,
+        message: `请${remaining}秒后再试`,
+      });
+    }
+
+    const code = generateCode(6);
+    const codeKey = `email:code:${email}`;
+    await redis.set(codeKey, code, 300);
+    await redis.set(rateLimitKey, Date.now().toString(), 60);
+
+    const mailResult = await sendVerificationCode(email, code);
+
+    if (!mailResult.success) {
+      if (!isEmailConfigured()) {
+        console.log(`[找回密码] ${email}: ${code} (邮箱未配置，验证码已输出到控制台)`);
+        return res.json({
+          code: 0,
+          message: "邮箱未配置，验证码已输出到服务器控制台，请查看后端日志获取验证码",
+        });
+      }
+      return res.status(500).json({
+        code: 500,
+        message: mailResult.message,
+      });
+    }
+
+    res.json({
+      code: 0,
+      message: "验证码已发送到邮箱",
+    });
+  } catch (error) {
+    console.error("Forgot password error:", error);
+    res.status(500).json({
+      code: 500,
+      message: "发送验证码失败",
+    });
+  }
+});
+
+router.post("/reset-password", async (req, res) => {
+  try {
+    const { email, code, newPassword } = req.body;
+
+    if (!email || !code || !newPassword) {
+      return res.status(400).json({
+        code: 400,
+        message: "请填写完整信息",
+      });
+    }
+
+    const userResult = await query(
+      "SELECT id FROM users WHERE email = $1",
+      [email]
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({
+        code: 404,
+        message: "该邮箱未注册",
+      });
+    }
+
+    const codeKey = `email:code:${email}`;
+    const storedCode = await redis.get(codeKey);
+
+    if (!storedCode || storedCode !== code) {
+      return res.status(400).json({
+        code: 400,
+        message: "验证码错误或已过期",
+      });
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    await query(
+      "UPDATE users SET password = $1 WHERE email = $2",
+      [hashedPassword, email]
+    );
+
+    await redis.del(codeKey);
+
+    res.json({
+      code: 0,
+      message: "密码重置成功，请登录",
+    });
+  } catch (error) {
+    console.error("Reset password error:", error);
     res.status(500).json({
       code: 500,
       message: "服务器内部错误",

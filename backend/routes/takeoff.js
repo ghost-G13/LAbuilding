@@ -13,7 +13,7 @@ router.get("/takeoff-filter", async (req, res) => {
     } = req.query;
 
     let sql = `
-      SELECT
+      SELECT DISTINCT ON (lb.id)
         lb.id,
         lb.bid,
         lb.height,
@@ -25,16 +25,17 @@ router.get("/takeoff-filter", async (req, res) => {
         nz.restrict,
         ST_AsGeoJSON(lb.geom) AS geometry
       FROM la_building lb
-      LEFT JOIN nofly_zone nz ON lb.bid = nz.bid
+      LEFT JOIN nofly_zone nz ON ST_Intersects(lb.geom, nz.geom)
       WHERE lb.height >= $1 AND lb.height <= $2
         AND lb.area_m2 >= $3 AND lb.area_m2 <= $4
+        AND lb.geom IS NOT NULL
     `;
 
     const params = [minHeight, maxHeight, minArea, maxArea];
 
     if (zoneType) {
-      sql += " AND nz.zone_name = $5";
       params.push(zoneType);
+      sql += ` AND nz.zone_name = $${params.length}`;
     }
 
     sql += " LIMIT 1000";
